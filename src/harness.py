@@ -86,7 +86,7 @@ def parse_action_chunk(raw_block: str) -> List[Waypoint]:
         dt = float(item.get("dt", 0.4))
         joints_raw = item.get("joints", {})
         if not isinstance(joints_raw, dict) or not joints_raw:
-            raise ValueError(f"Waypoint {idx} 'joints' must be a non-empty dict of `{joint_name: radians}`.")
+            raise ValueError(f"Waypoint {idx} 'joints' must be a non-empty dict of `{{joint_name: radians}}`.")
         unknown = [k for k in joints_raw if k not in valid_set]
         if unknown:
             raise ValueError(f"Unknown joint name(s) {unknown}. Valid joints: {list(JOINT_NAMES)}")

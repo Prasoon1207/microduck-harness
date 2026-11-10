@@ -23,18 +23,18 @@ def build_system_prompt(
 Standing `STAND` baseline values and hardware limits `[min, max]` in radians:
 
 ### Neck & Head (4 joints — Note: `neck_pitch` and `head_pitch` have OPPOSITE pitch axes!)
-- `neck_pitch`  range `[-1.57, +1.05]`, STAND = `+0.38`  (**DECREASING / negative** pitches the neck base **FORWARD & DOWN**; increasing pulls neck UP & BACK)
-- `head_pitch`  range `[-1.57, +1.57]`, STAND = `+0.39`  (**INCREASING / more positive** e.g. `+0.8..+1.3` tilts the beak **DOWN toward the floor**; decreasing tilts beak UP)
-- `head_yaw`    range `[-2.97, +2.97]`, STAND = `0.00`   (`+` turns beak LEFT toward `+Y`; `-` turns beak RIGHT toward `-Y`)
-- `head_roll`   range `[-0.44, +0.44]`, STAND = `0.00`   (tilts head ear-to-shoulder)
+- `neck_pitch`  range `[-1.57, +1.05]`, STAND = `+0.349` (**DECREASING / negative** pitches the neck base **FORWARD & DOWN**; increasing pulls neck UP & BACK)
+- `head_pitch`  range `[-1.57, +1.57]`, STAND = `+0.349` (**INCREASING / more positive** e.g. `+0.8..+1.3` tilts the beak **DOWN toward the floor**; decreasing tilts beak UP)
+- `head_yaw`    range `[-2.97, +2.97]`, STAND = `0.000`  (`+` turns beak LEFT toward `+Y`; `-` turns beak RIGHT toward `-Y`)
+- `head_roll`   range `[-0.44, +0.44]`, STAND = `0.000`  (tilts head ear-to-shoulder)
 
 ### Legs (10 joints — IMPORTANT: Left & Right XL330 Servo Horns Are Mounted Mirrored!)
 Because left and right leg servos face opposite outward directions in CAD, **symmetric bilateral leg motions require OPPOSITE signs on `left_*` vs `right_*` pitch, knee, ankle, and roll**:
 - `left_hip_yaw`   `[-0.44, +0.52]`, STAND = `0.000`  | `right_hip_yaw`   `[-0.52, +0.44]`, STAND = `0.000`
-- `left_hip_roll`  `[-0.38, +0.38]`, STAND = `-0.084` | `right_hip_roll`  `[-0.38, +0.38]`, STAND = `+0.084`
-- `left_hip_pitch` `[-1.57, +1.57]`, STAND = `-0.453` | `right_hip_pitch` `[-1.57, +1.57]`, STAND = `+0.453`
-- `left_knee`      `[-1.57, +1.57]`, STAND = `+0.106` | `right_knee`      `[-1.57, +1.57]`, STAND = `-0.107`
-- `left_ankle`     `[-1.57, +1.57]`, STAND = `+0.450` | `right_ankle`     `[-1.57, +1.57]`, STAND = `-0.450`
+- `left_hip_roll`  `[-0.38, +0.38]`, STAND = `-0.087` | `right_hip_roll`  `[-0.38, +0.38]`, STAND = `+0.087`
+- `left_hip_pitch` `[-1.57, +1.57]`, STAND = `-0.458` | `right_hip_pitch` `[-1.57, +1.57]`, STAND = `+0.458`
+- `left_knee`      `[-1.57, +1.57]`, STAND = `0.000`  | `right_knee`      `[-1.57, +1.57]`, STAND = `0.000`
+- `left_ankle`     `[-1.57, +1.57]`, STAND = `+0.453` | `right_ankle`     `[-1.57, +1.57]`, STAND = `-0.453`
 
 **Verified Avian 3-Link Flat-Foot Law (Measured from MuJoCo `data.xaxis`):**
 MicroDuck has an **avian backward-hock leg** (`left_hip_pitch` axis `+Y`, `left_knee` axis `-Y`, `left_ankle` axis `+Y`), so keeping both soles flat on the floor requires `left_hip_pitch - left_knee + left_ankle ≈ 0` (and opposite signs on the right leg):
