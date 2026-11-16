@@ -210,13 +210,38 @@ export function reattachStopTag(text, stopSequences, explicitStop = null) {
 
 /* Direct Browser -> Google Gemini API Client (API key never touches any third-party server) */
 
-const PREFERRED_MODELS = [
+export const PREFERRED_MODELS = [
   "gemini-3.5-flash",
-  "gemini-flash-latest",
-  "gemini-3.8-flash",
-  "gemini-pro-latest",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
   "gemini-3-flash-preview",
+  "gemini-flash-latest",
+  "gemini-3.5-flash-lite",
+  "gemini-flash-lite-latest",
+  "gemini-3.1-flash-lite",
+  "gemini-pro-latest",
+  "gemini-3.1-pro-preview",
 ];
+
+function sleepAbortable(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(new DOMException("Aborted", "AbortError"));
+        },
+        { once: true }
+      );
+    }
+  });
+}
 
 export async function listGeminiModelsDirect(apiKey) {
   const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
@@ -238,24 +263,38 @@ export async function listGeminiModelsDirect(apiKey) {
   }
   const data = await resp.json();
   const rawModels = (data && data.models) || [];
-  const textModels = rawModels
+  const discovered = rawModels
     .filter(
       (m) =>
         Array.isArray(m.supportedGenerationMethods) &&
         m.supportedGenerationMethods.includes("generateContent") &&
         typeof m.name === "string" &&
         m.name.includes("gemini") &&
-        !/tts|image|transcribe|embedding|imagen|veo/i.test(m.name)
+        !/tts|image|transcribe|embedding|imagen|veo|computer-use|banana/i.test(m.name)
     )
     .map((m) => m.name.replace(/^models\//, ""));
 
-  const bestDefault = PREFERRED_MODELS.find((p) => textModels.includes(p)) || textModels[0] || "gemini-flash-latest";
-  return { models: textModels, bestDefault };
+  // Order curated reliable/fast models first, followed by any other enabled Gemini models
+  const ordered = [
+    ...PREFERRED_MODELS.filter((m) => discovered.includes(m)),
+    ...discovered.filter((m) => !PREFERRED_MODELS.includes(m)),
+  ];
+  const bestDefault = ordered[0] || "gemini-flash-lite-latest";
+  return { models: ordered, bestDefault };
 }
 
-export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, stopSequences = STOP_SEQUENCES, signal }) {
+export async function callGeminiDirect({
+  apiKey,
+  model,
+  availableModels = [],
+  systemPrompt,
+  messages,
+  stopSequences = STOP_SEQUENCES,
+  signal,
+  onStatus,
+}) {
   const t0 = performance.now();
-  let modelId = String(model || "gemini-3.5-flash").replace(/^models\//, "").trim();
+  let modelId = String(model || "gemini-flash-lite-latest").replace(/^models\//, "").trim();
 
   const contents = messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
@@ -292,15 +331,42 @@ export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, 
     });
   }
 
-  async function postWithModelFallback(genConfig) {
+  async function postWithResilience(genConfig) {
+    // 1. Try selected model (with one quick retry on transient 503 spike)
     let resp = await postGenerate(modelId, genConfig);
-    if (resp.status === 404) {
-      const discovered = await listGeminiModelsDirect(apiKey);
-      if (discovered.bestDefault && discovered.bestDefault !== modelId) {
-        modelId = discovered.bestDefault;
-        resp = await postGenerate(modelId, genConfig);
+    if (resp.status === 503) {
+      if (onStatus) onStatus(`${modelId} busy (503), retrying...`);
+      await sleepAbortable(900, signal);
+      resp = await postGenerate(modelId, genConfig);
+    }
+
+    // 2. On persistent 503/429/404/500, automatically fail over across enabled models
+    if ([404, 429, 500, 502, 503, 504].includes(resp.status)) {
+      let pool = Array.isArray(availableModels) && availableModels.length > 0 ? availableModels : null;
+      if (!pool) {
+        try {
+          pool = (await listGeminiModelsDirect(apiKey)).models;
+        } catch {
+          pool = PREFERRED_MODELS;
+        }
+      }
+      const fallbacks = [
+        ...PREFERRED_MODELS.filter((m) => pool.includes(m) && m !== modelId),
+        ...pool.filter((m) => !PREFERRED_MODELS.includes(m) && m !== modelId),
+      ].slice(0, 4);
+
+      for (const candidate of fallbacks) {
+        if (onStatus) onStatus(`${modelId} returned ${resp.status}, switching to ${candidate}...`);
+        const nextResp = await postGenerate(candidate, genConfig);
+        if (nextResp.ok) {
+          modelId = candidate;
+          return nextResp.json();
+        }
+        resp = nextResp;
+        if (![404, 429, 500, 502, 503, 504].includes(resp.status)) break;
       }
     }
+
     if (!resp.ok) {
       let detail = `HTTP ${resp.status}`;
       try {
@@ -314,7 +380,7 @@ export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, 
     return resp.json();
   }
 
-  let data = await postWithModelFallback({
+  let data = await postWithResilience({
     temperature: 0.2,
     maxOutputTokens: 8192,
     stopSequences,
@@ -323,7 +389,7 @@ export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, 
 
   // Fallback if a thinking model matched a stop delimiter inside internal thought parts
   if (stopSequences.length > 0 && !rawText.trim()) {
-    data = await postWithModelFallback({
+    data = await postWithResilience({
       temperature: 0.2,
       maxOutputTokens: 8192,
     });

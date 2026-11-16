@@ -23,8 +23,7 @@ import { MicroDuckWasmSim } from "./sim.js";
     simStatusText: document.getElementById("sim-status-text"),
     keyBadge: document.getElementById("key-badge"),
     btnKeyManage: document.getElementById("btn-key-manage"),
-    modelInput: document.getElementById("model-name-input"),
-    modelSuggestions: document.getElementById("model-suggestions"),
+    modelSelect: document.getElementById("model-select"),
     btnStand: document.getElementById("btn-reset-stand"),
     btnSit: document.getElementById("btn-reset-sit"),
     btnClear: document.getElementById("btn-clear-chat"),
@@ -65,9 +64,34 @@ import { MicroDuckWasmSim } from "./sim.js";
     entrySeq: 0,
     cards: new Map(),
     llmMessages: [],
+    availableModels: [],
     abortCtrl: null,
     cancelRequested: false,
   };
+
+  function formatModelOptionLabel(m) {
+    if (m.includes("flash-lite")) return `${m} (fast)`;
+    return m;
+  }
+
+  function populateModelSelect(models, preferred) {
+    if (!el.modelSelect || !Array.isArray(models) || models.length === 0) return;
+    const prev = el.modelSelect.value;
+    el.modelSelect.innerHTML = "";
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = formatModelOptionLabel(m);
+      el.modelSelect.appendChild(opt);
+    }
+    if (prev && models.includes(prev)) {
+      el.modelSelect.value = prev;
+    } else if (preferred && models.includes(preferred)) {
+      el.modelSelect.value = preferred;
+    } else {
+      el.modelSelect.value = models[0];
+    }
+  }
 
   function escHtml(str) {
     return String(str ?? "")
@@ -95,7 +119,7 @@ import { MicroDuckWasmSim } from "./sim.js";
     el.btnSend.disabled = !unlocked || state.busy;
     el.btnSend.hidden = state.busy;
     el.btnStop.hidden = !state.busy;
-    el.modelInput.disabled = state.busy || _authMode === "demo";
+    el.modelSelect.disabled = state.busy || _authMode === "demo";
 
     if (!state.simReady) {
       el.promptInput.placeholder = "Loading 50 Hz MuJoCo WASM...";
@@ -159,17 +183,9 @@ import { MicroDuckWasmSim } from "./sim.js";
     el.btnSaveKey.textContent = "Verifying...";
     try {
       const { models, bestDefault } = await listGeminiModelsDirect(raw);
-      if (models.length > 0 && el.modelSuggestions) {
-        el.modelSuggestions.innerHTML = "";
-        for (const m of models) {
-          const opt = document.createElement("option");
-          opt.value = m;
-          el.modelSuggestions.appendChild(opt);
-        }
-        const cur = el.modelInput.value.trim();
-        if (!cur || !models.includes(cur)) {
-          el.modelInput.value = bestDefault;
-        }
+      if (models.length > 0) {
+        state.availableModels = models;
+        populateModelSelect(models, bestDefault);
       }
       _ephemeralGeminiKey = raw;
       _authMode = "gemini";
@@ -535,16 +551,28 @@ import { MicroDuckWasmSim } from "./sim.js";
           if (!_ephemeralGeminiKey) {
             throw new Error("Gemini API key was cleared. Enter your key again.");
           }
+          const chosenModel = el.modelSelect.value || "gemini-flash-lite-latest";
+          card.liveEl.textContent = `Turn ${subturn}: generating (${chosenModel})...`;
           gen = await callGeminiDirect({
             apiKey: _ephemeralGeminiKey,
-            model: el.modelInput.value.trim() || "gemini-3.5-flash",
+            model: chosenModel,
+            availableModels: state.availableModels,
             systemPrompt: INTERACTIVE_SYSTEM_PROMPT,
             messages: state.llmMessages,
             stopSequences: STOP_SEQUENCES,
             signal: state.abortCtrl.signal,
+            onStatus: (note) => {
+              card.liveEl.textContent = `Turn ${subturn}: ${note}`;
+            },
           });
-          if (gen.model && el.modelInput.value !== gen.model) {
-            el.modelInput.value = gen.model;
+          if (gen.model && el.modelSelect.value !== gen.model) {
+            if (!Array.from(el.modelSelect.options).some((o) => o.value === gen.model)) {
+              const opt = document.createElement("option");
+              opt.value = gen.model;
+              opt.textContent = formatModelOptionLabel(gen.model);
+              el.modelSelect.prepend(opt);
+            }
+            el.modelSelect.value = gen.model;
           }
         }
 

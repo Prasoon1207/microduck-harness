@@ -133,6 +133,7 @@ a:hover {
   color: var(--cyan);
 }
 
+.ctrl-select,
 .ctrl-input,
 .btn {
   height: 28px;
@@ -145,10 +146,16 @@ a:hover {
   outline: none;
 }
 
+.ctrl-select {
+  max-width: 225px;
+  cursor: pointer;
+}
+
 .ctrl-input {
   width: 150px;
 }
 
+.ctrl-select:focus,
 .ctrl-input:focus {
   border-color: var(--blue);
 }
