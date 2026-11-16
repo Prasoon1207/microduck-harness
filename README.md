@@ -2,7 +2,9 @@
 
 A minimal, framework-free **Always-On Robotics Harness** (~140 lines of core control loop in [`src/harness.py`](src/harness.py)) that lets off-the-shelf **generalist LLMs** zero-shot control Pollen Robotics' 14-DOF bipedal **MicroDuck** directly inside a **50 Hz MuJoCo** physics simulation.
 
-There are **no RL policies, no ONNX walking controllers, and no agent frameworks** underneath—only pre-printed physical rules, structured `<thought>` + `<action_chunk>` text generation, mid-stream `stop`-sequence interception (`["</action_chunk>", "</done>"]`), 50 Hz minimum-jerk servo interpolation, and `<observation>` continuation.
+There are **no RL policies, no ONNX walking controllers, and no agent frameworks** underneath—only pre-printed physical rules, structured `<action_chunk>` text generation, mid-stream `stop`-sequence interception (`["</action_chunk>", "</done>"]`), 50 Hz minimum-jerk servo interpolation, and `<observation>` continuation.
+
+**Live Browser Demo (GitHub Pages — 50 Hz MuJoCo WASM + Bring Your Own Gemini Key):** **[https://prasoon1207.github.io/microduck-harness/](https://prasoon1207.github.io/microduck-harness/)**
 
 ---
 
@@ -12,7 +14,7 @@ There are **no RL policies, no ONNX walking controllers, and no agent frameworks
 System Contract (189 g head mass warning, mirrored CAD servo signs, avian flat-foot law)
    │
    ▼
-[Generalist LLM] ──► <thought>...</thought><action_chunk>[...]</action_chunk>  ◄── STOP intercepted!
+[Generalist LLM] ──► <action_chunk>[...]</action_chunk>  ◄── STOP intercepted!
                                                 │
                                      (if malformed JSON/joint)
                                                 ├──► <harness_error>...</harness_error> (self-repair)
@@ -21,20 +23,20 @@ System Contract (189 g head mass warning, mirrored CAD servo signs, avian flat-f
                                   (XL330 kp=3.2, ±0.96 N·m clamp, fall supervisor)
                                                 │
                                                 ▼
-   ◄─────────── <observation> (14 joints, RPY, CoM vs. foot support margins, 3D beak/target)
+   ◄─────────── <observation> (14 joints, RPY, CoM vs. foot support margins, 3D beak pose)
 ```
 
 ---
 
 ## End-to-End Demo: User Requirement → What the LLM Sees → What It Outputs
 
-Below is an actual closed-loop rollout on the **`peck_target`** task using an off-the-shelf generalist model (**`gemini-pro-latest`**, `temperature=0.1`) with zero task-specific training or robotics fine-tuning.
+Below is the closed-loop rollout on the **`deep_bow`** task (Counter-Balanced Deep Bow) with zero task-specific training or robotics fine-tuning.
 
 ### 1. The User Requirement
 
-The user specifies a plain-English physical goal (`src/tasks.py`) paired with a programmatic MuJoCo evaluator:
+The user specifies a plain-English physical goal ([`src/tasks.py`](src/tasks.py)) paired with a programmatic MuJoCo evaluator:
 
-> **Task (`peck_target`):** *"A red berry sits on a low stem in front of you at `target_xyz_m` (`[0.046, 0.018, 0.074]` m — 14.4 cm below your standing beak height). Using closed-loop feedback on your beak coordinates and CoM balance margin, crouch and counter-balance your pelvis to touch the berry with the tip of your beak (`beak_to_target_dist_m <= 0.020 m`) without falling over, then return to an upright stand (`trunk_pos_m` z >= 0.110 m)."*
+> **Task (`deep_bow`):** *"Perform a deep, respectful bow: lower the tip of your beak (`mouth_tip_xyz_m` z) below 0.095 m while keeping BOTH feet grounded and without falling forward, then return cleanly to an upright standing pose (`mouth_tip` z >= 0.170 m)."*
 
 ---
 
@@ -81,18 +83,18 @@ MicroDuck has an **avian backward-hock leg** (`left_hip_pitch` axis `+Y`, `left_
    (Scale `β` back down to `0` in lockstep when retracting the head upright!)
 
 ## 3. Closed-Loop Control Strategy
-- Prefer **short, incremental action chunks (1–2 waypoints, `dt` = 0.35s–0.60s)** when performing delicate balance or 3D beak reaching so you can inspect the resulting `<observation>` and correct `delta_xyz` and `toe_margin` in closed loop!
+- Prefer **short, incremental action chunks (1–2 waypoints, `dt` = 0.35s–0.85s)** when performing delicate balance or deep bowing so you can inspect the resulting `<observation>` and check `mouth_tip_xyz_m` and `toe_margin` in closed loop!
 - Always check `toe_margin` and `heel_margin` before lowering your beak further. Keep `toe_margin > 0.012 m` whenever standing on your feet.
 
 ## 4. Strict Harness Output Protocol
-On EVERY turn, emit brief physical reasoning inside `<thought>...</thought>` followed IMMEDIATELY by EITHER `<action_chunk>[...]</action_chunk>` OR `<done>...</done>`.
+On EVERY turn, emit EITHER `<action_chunk>[...]</action_chunk>` OR `<done>...</done>`.
 ```
 
 #### B. Turn 0 User Prompt (`<goal>` + Ground-Truth MuJoCo `<observation step="0">`)
 
 ```xml
 <goal>
-A red berry sits on a low stem in front of you at `target_xyz_m` ([0.046, 0.018, 0.074] m — 14.4 cm below your standing beak height). Using closed-loop feedback on your beak coordinates and CoM balance margin, crouch and counter-balance your pelvis to touch the berry with the tip of your beak (`beak_to_target_dist_m <= 0.020 m`) without falling over, then return to an upright stand (`trunk_pos_m` z >= 0.110 m).
+Perform a deep, respectful bow: lower the tip of your beak (`mouth_tip_xyz_m` z) below 0.095 m while keeping BOTH feet grounded and without falling forward, then return cleanly to an upright standing pose (`mouth_tip` z >= 0.170 m).
 </goal>
 
 <observation step="0" sim_time="0.00s" status="OK">
@@ -103,7 +105,6 @@ A red berry sits on a low stem in front of you at `target_xyz_m` ([0.046, 0.018,
   com_xyz_m: [0.003, -0.000, 0.138]
   support_x_span_m: [-0.019, 0.033] (toe_margin=+0.030m, heel_margin=+0.022m -> STABLE_CENTERED)
   mouth_tip_xyz_m: [0.074, -0.000, 0.218]
-  target_xyz_m: [0.046, 0.018, 0.074] (delta_xyz=[-0.028, +0.018, -0.144]m, dist=0.148m, best_so_far=0.148m)
   joints_rad: {left_hip_yaw: -0.000, left_hip_roll: -0.083, left_hip_pitch: -0.459, left_knee: +0.017, left_ankle: +0.448, neck_pitch: +0.351, head_pitch: +0.359, head_yaw: +0.000, head_roll: +0.000, right_hip_yaw: +0.000, right_hip_roll: +0.083, right_hip_pitch: +0.459, right_knee: -0.017, right_ankle: -0.448}
 </observation>
 ```
@@ -112,78 +113,62 @@ A red berry sits on a low stem in front of you at `target_xyz_m` ([0.046, 0.018,
 
 ### 3. What the LLM Outputs (Intercepted Live Stream & Physics Continuation)
 
-#### Turn 1 — LLM Output (`gemini-pro-latest`, halted at `</action_chunk>`)
+#### Turn 1 — Counter-Balanced Deep Bow (Halted at `</action_chunk>`)
 
-The model reasons over the `[-0.028, +0.018, -0.144] m` 3D offset, applies the mirrored CAD squat + pelvic counter-balance (`δ = 0.40`, `β = 0.15`), and emits an `<action_chunk>`. The HTTP client (`src/llm_client.py`) passes `stopSequences=["</action_chunk>", "</done>"]`, freezing generation the instant `</action_chunk>` closes so the model **cannot hallucinate future physics**:
+From `<observation step="0">`, the beak tip starts at `z = 0.218 m` (`21.8 cm`) with `toe_margin = +0.030 m`. Because pitching the 189 g head forward alone shifts `com_xyz_m` X past the front toes (`+0.033 m`), the model combines an avian flat-foot squat (`δ = 0.58`) with pelvic CoM pullback (`β = 0.24`) while pitching `neck_pitch = -0.35` and `head_pitch = +1.38`. The HTTP client ([`src/llm_client.py`](src/llm_client.py)) passes `stopSequences=["</action_chunk>", "</done>"]`, freezing generation the instant `</action_chunk>` closes so the model **cannot hallucinate future physics**:
 
 ```xml
-<thought>
-Okay, here's the situation: I need to get my beak tip to `[0.046, 0.018, 0.074]` to touch that red berry. Currently, my beak is at `[0.074, -0.000, 0.218]`. That's a delta of `[-0.028, +0.018, -0.144]`. I need to go 14.4 cm down (Z), slightly to the left (+Y), and a bit back (-X).
-
-For the squat, I'll go with `δ = 0.4` and for the pelvis pullback `β = 0.15`:
-- left_hip_pitch = -0.208, right_hip_pitch = 0.208
-- left_knee = 0.8, right_knee = -0.8
-- left_ankle = 1.003, right_ankle = -1.003
-And I'll pitch head_pitch down to 0.8 and turn head_yaw left to 0.2 over a 0.6s chunk.
-</thought>
 <action_chunk>
 [
   {
-    "dt": 0.6,
+    "dt": 0.85,
     "joints": {
-      "left_hip_pitch": -0.208,
-      "right_hip_pitch": 0.208,
-      "left_knee": 0.8,
-      "right_knee": -0.8,
-      "left_ankle": 1.003,
-      "right_ankle": -1.003,
-      "head_pitch": 0.8,
-      "head_yaw": 0.2
+      "left_hip_pitch": -0.118,
+      "right_hip_pitch": 0.118,
+      "left_knee": 1.16,
+      "right_knee": -1.16,
+      "left_ankle": 1.273,
+      "right_ankle": -1.273,
+      "neck_pitch": -0.35,
+      "head_pitch": 1.38
     }
   }
 ]
 </action_chunk>
 ```
-> **`▲ STOP SEQUENCE INTERCEPTED (`</action_chunk>`)`** — Generation freezes here. `MicroDuckEnv.step_chunk()` minimum-jerk interpolates the 14 XL330 targets across 30 control ticks (`0.60s` at `50 Hz`, `240` MuJoCo substeps at `dt=2.5ms`) and replies with ground-truth `<observation step="1">`:
+> **`▲ STOP SEQUENCE INTERCEPTED (`</action_chunk>`)`** — Generation freezes here. `MicroDuckEnv.step_chunk()` minimum-jerk interpolates the 14 XL330 targets across `0.85s` at `50 Hz` (`340` MuJoCo substeps at `dt=2.5ms`) and replies with ground-truth `<observation step="1">`:
 
 ```xml
-<observation step="1" sim_time="0.60s" status="OK">
-  trunk_pos_m: [-0.007, -0.000, 0.094]
-  trunk_rpy_deg: [roll=-0.0, pitch=3.1, yaw=-0.1]
+<observation step="1" sim_time="0.84s" status="OK">
+  trunk_pos_m: [-0.007, -0.000, 0.080]
+  trunk_rpy_deg: [roll=0.0, pitch=5.7, yaw=-0.0]
   fallen: false
   feet_grounded: [left=true, right=true]
-  com_xyz_m: [0.001, 0.001, 0.116]
-  support_x_span_m: [-0.019, 0.033] (toe_margin=+0.032m, heel_margin=+0.021m -> STABLE_CENTERED)
-  mouth_tip_xyz_m: [0.070, 0.012, 0.164]
-  target_xyz_m: [0.046, 0.018, 0.074] (delta_xyz=[-0.024, +0.006, -0.090]m, dist=0.094m, best_so_far=0.094m)
-  joints_rad: {left_hip_yaw: +0.001, left_hip_roll: -0.085, left_hip_pitch: -0.217, left_knee: +0.841, left_ankle: +1.003, neck_pitch: +0.338, head_pitch: +0.825, head_yaw: +0.199, head_roll: +0.001, right_hip_yaw: -0.001, right_hip_roll: +0.088, right_hip_pitch: +0.217, right_knee: -0.842, right_ankle: -1.003}
+  com_xyz_m: [0.015, -0.000, 0.087]
+  support_x_span_m: [-0.019, 0.033] (toe_margin=+0.018m, heel_margin=+0.034m -> STABLE_CENTERED)
+  mouth_tip_xyz_m: [0.050, -0.000, 0.089]
+  joints_rad: {left_hip_yaw: +0.004, left_hip_roll: -0.081, left_hip_pitch: -0.142, left_knee: +1.216, left_ankle: +1.260, neck_pitch: -0.394, head_pitch: +1.407, head_yaw: +0.000, head_roll: +0.000, right_hip_yaw: -0.005, right_hip_roll: +0.080, right_hip_pitch: +0.142, right_knee: -1.216, right_ankle: -1.261}
 </observation>
 ```
 
-#### Turns 2–5 — Closed-Loop Residual Refinement (`14.8 cm → 0.7 cm`) & Upright Return
+#### Turn 2 — Closed-Loop Verification & Lockstep Upright Return
 
-On each subsequent turn, the LLM inspects `delta_xyz` and `toe_margin` from MuJoCo and refines `(δ, β, neck_pitch, head_pitch, head_yaw)` in closed loop before standing back up:
+`<observation step="1">` confirms the beak tip reached `z = 0.089 m` (`8.9 cm <= 9.5 cm` goal) while keeping both feet grounded and `toe_margin = +18 mm` (`STABLE_CENTERED`). On Turn 2, the model scales `(δ, β)` back down to `0` in lockstep with retracting the head upright to `STAND`:
 
-| Turn | Sim Time | LLM Action Summary | Resulting Beak-to-Berry `dist` | CoM `toe_margin` | Balance Status |
+| Turn | Sim Time | LLM Action Summary | Beak Height (`mouth_tip` Z) | CoM `toe_margin` | Balance Status |
 | :--- | :---: | :--- | :---: | :---: | :--- |
-| **0 (Init)** | `0.00s` | `STAND` keyframe | `14.8 cm` | `+30 mm` | `STABLE_CENTERED` |
-| **1** | `0.60s` | Squat `δ=0.40, β=0.15`, `head_pitch=0.80, yaw=0.20` | `9.4 cm` | `+32 mm` | `STABLE_CENTERED` |
-| **2** | `1.20s` | Deeper squat `δ=0.65, β=0.25`, `neck=0.00, head=1.20, yaw=0.30` | `3.4 cm` | `+21 mm` | `STABLE_CENTERED` |
-| **3** | `1.70s` | Pullback `δ=0.65, β=0.30`, `neck=-0.25, head=1.35, yaw=0.30` | `1.6 cm` | `+19 mm` | `STABLE_CENTERED` |
-| **4** | `2.20s` | Fine touch `δ=0.70, β=0.35`, `neck=-0.35, head=1.45, yaw=0.30` | **`0.7 cm` (`7 mm`!)** | `+20 mm` | `STABLE_CENTERED` |
-| **5** | `3.20s` | Zero `(δ, β)` in lockstep back to `STAND` (`dt=1.0s`) | `14.9 cm` (`best=0.7 cm`) | `+33 mm` | `STABLE_CENTERED` (`z=0.116m`) |
+| **0 (Init)** | `0.00s` | `STAND` keyframe | `21.8 cm` (`0.218 m`) | `+30 mm` | `STABLE_CENTERED` |
+| **1** | `0.84s` | Squat `δ=0.58, β=0.24`, `neck=-0.35, head=+1.38` | **`8.9 cm` (`0.089 m`!)** | `+18 mm` | `STABLE_CENTERED` |
+| **2** | `2.38s` | Zero `(δ, β)` in lockstep back to `STAND` | `21.9 cm` (`0.219 m`) | `+31 mm` | `STABLE_CENTERED` |
 
-#### Turn 6 — Task Completion (`</done>` Interception)
+#### Turn 3 — Task Completion (`</done>` Interception)
 
-After `<observation step="5">` confirms `best_so_far=0.007m` (`<= 0.020m`), `fallen: false`, and `trunk_pos_m: [-0.002, -0.000, 0.116]` (`>= 0.110m`), the LLM emits `<done>`:
+After `<observation step="2">` confirms `mouth_tip_xyz_m` z = `0.219 m` (`>= 0.170 m`), `trunk_pos_m` z = `0.116 m`, and `fallen: false`, the LLM emits `<done>`:
 
 ```xml
-<thought>
-The robot is upright (`trunk_pos_m` z = 0.116 m >= 0.110 m), `fallen: false`, both feet grounded, CoM centered (`toe_margin = +0.033m`), and `best_so_far = 0.007m` (`<= 0.020m`). All task constraints are met.
-</thought>
-<done>Successfully crouched and counter-balanced to touch the red berry with the beak tip (minimum distance achieved: 0.007m), and then safely returned to a stable, upright standing posture with trunk height at 0.116m.</done>
+<done>Completed counter-balanced deep bow below 9.5cm and returned upright.</done>
 ```
-> **Evaluator Result:** `[PASS] fell=False, min_beak_dist=0.7cm (goal <=2.0cm), final_trunk_z=0.116m`
+> **Evaluator Result:** `[PASS] fell=False, min_beak_z=0.089m (goal <=0.095m), final_beak_z=0.219m`
 
 *(If a model ever emits an unknown joint name or malformed JSON inside `<action_chunk>`, the harness catches it without stepping MuJoCo and injects `<harness_error>Invalid action_chunk schema: ...</harness_error>` so the model self-repairs on the next turn.)*
 
@@ -196,44 +181,66 @@ The robot is upright (`trunk_pos_m` z = 0.116 m >= 0.110 m), `fallen: false`, bo
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. Run the 5-task deterministic closed-loop benchmark + export MP4 & synced HTML widgets
-.venv/bin/python run_task.py --task all --provider closed_loop --record
+# 2. Launch the Interactive Harness Studio Web UI (live 50 Hz MuJoCo + natural-language chat console)
+.venv/bin/python run_ui.py
+# (Auto-detects GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY from .env, or pass --provider demo)
 
-# 3. Run the two ablations (open-loop without CoM pullback & blind CAD symmetry)
-.venv/bin/python run_task.py --task peck_target --provider open_loop_naive --no-balance-margin --slug-suffix naive_openloop --record
+# 3. Or run headless benchmark/ablation rollouts + export MP4 & synced HTML trace widgets
+.venv/bin/python run_task.py --task deep_bow --provider closed_loop --record
+.venv/bin/python run_task.py --task deep_bow --provider open_loop_naive --no-balance-margin --slug-suffix naive_openloop --record
 .venv/bin/python run_task.py --task deep_bow --provider blind_symmetry --coordinate-mode raw_undocumented --slug-suffix blind_symmetry --record
 
 # 4. Run unit & live integration tests (live Gemini tests run automatically if GEMINI_API_KEY is in .env)
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-## Running with Live Generalist LLMs
+## Interactive Harness UI (`run_ui.py`)
+
+`run_ui.py` starts a local **Uvicorn + Starlette** web app (`http://127.0.0.1:8765`) and opens it directly in standalone Chrome, driving a continuous **50 Hz MuJoCo** physics loop alongside a minimal Solarized Light chat console:
+
+- **Talk directly to MicroDuck** in plain English (e.g., *"do a deep bow"*, *"look left, look right, and nod twice"*, *"waddle forward two steps"*, *"turn left in place"*, *"squat and hold"*).
+- **Inspect closed-loop turns**: expand any turn to see the intercepted `<action_chunk>` (`STOP` delimiter) and the resulting `<observation>` XML.
+- **Interactive 3D viewport**: drag to orbit, scroll to zoom, or switch between `Split`, `3/4`, `Front`, `Side`, and `POV` cameras.
+- **Switch providers live**: toggle between Gemini, Anthropic, OpenAI, OpenRouter, DeepSeek, custom `LLM_BASE_URL` servers, or the offline `demo` policy.
+
+## Running CLI Tasks with Live Generalist LLMs
 
 `src/llm_client.py` auto-loads a local gitignored `.env` (or environment variables) and supports `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, or any local OpenAI-compatible server (`LLM_BASE_URL`, e.g. vLLM / Ollama):
 
 ```bash
 # Google Gemini (generalist models)
-GEMINI_API_KEY="..." .venv/bin/python run_task.py --task peck_target --provider gemini --model gemini-pro-latest --record
-GEMINI_API_KEY="..." .venv/bin/python run_task.py --task look_and_nod --provider gemini --model gemini-3.5-flash --record
+GEMINI_API_KEY="..." .venv/bin/python run_task.py --task deep_bow --provider gemini --model gemini-pro-latest --record
+GEMINI_API_KEY="..." .venv/bin/python run_task.py --task deep_bow --provider gemini --model gemini-3.5-flash --record
 
 # OpenAI
-OPENAI_API_KEY="..." .venv/bin/python run_task.py --task peck_target --provider openai --model gpt-4.1 --record
+OPENAI_API_KEY="..." .venv/bin/python run_task.py --task deep_bow --provider openai --model gpt-4.1 --record
 
 # Anthropic Claude
 ANTHROPIC_API_KEY="..." .venv/bin/python run_task.py --task deep_bow --provider anthropic --model claude-sonnet-4-20250514 --record
 
 # Interactive 3D MuJoCo viewer on macOS (requires mjpython)
-.venv/bin/mjpython run_task.py --task peck_target --provider closed_loop --viewer
+.venv/bin/mjpython run_task.py --task deep_bow --provider closed_loop --viewer
 ```
+
+## Public Browser-Native Site (`site/` — GitHub Pages)
+
+[`site/`](site/) runs the entire 50 Hz MuJoCo simulation (`@mujoco/mujoco@4.0.1` WebAssembly) and 60 FPS Three.js WebGL renderer **100% client-side** on GitHub Pages ([`https://prasoon1207.github.io/microduck-harness/`](https://prasoon1207.github.io/microduck-harness/)) with verifiable **Zero-Storage BYOK** security:
+
+- **Zero backend server**: Pure static files served from GitHub Pages; we operate no backend, proxy, database, or analytics.
+- **Browser-enforced `Content-Security-Policy`**: Enforces `connect-src 'self' https://generativelanguage.googleapis.com` and self-hosted SHA-256-verified WASM/WebGL vendor bundles (`script-src 'self' ...`), blocking requests to any other domain.
+- **Volatile RAM closure only**: Visitor API keys stay inside a private JavaScript closure (`localStorage`, `sessionStorage`, and `cookies` remain empty; cleared immediately on **Forget Key** or closing the tab), plus an offline **Demo mode** requiring no API key.
 
 ## Project Layout
 
+- [`site/`](site/), [`scripts/build_pages.py`](scripts/build_pages.py), & [`.github/workflows/pages.yml`](.github/workflows/pages.yml) — Static GitHub Pages web app (50 Hz MuJoCo WASM + Three.js WebGL + direct browser-to-Gemini BYOK with strict CSP sandbox).
+- [`run_ui.py`](run_ui.py) & [`src/ui_server.py`](src/ui_server.py) — Single-command Uvicorn + Starlette launcher, dedicated 50 Hz MuJoCo + HD CGL rendering engine, and stateful multi-turn conversational harness controller.
+- [`src/web/`](src/web/) — Minimal Vanilla HTML/CSS/JS Solarized Light interface (`index.html`, `styles.css`, `app.js`).
 - [`src/harness.py`](src/harness.py) — Core ~140-line stop-sequence interception & continuation loop with `<harness_error>` schema self-repair.
-- [`src/env.py`](src/env.py) — 50 Hz position-controlled `MicroDuckEnv`, XL330 stiffness calibration (`kp=3.2 N·m/rad`, `±0.96 N·m`), mocap target berry & CoM projection disc, dual-camera renderer.
+- [`src/env.py`](src/env.py) — 50 Hz position-controlled `MicroDuckEnv`, XL330 stiffness calibration (`kp=3.2 N·m/rad`, `±0.96 N·m`), CoM projection disc, dual-camera renderer.
 - [`src/telemetry.py`](src/telemetry.py) — Whole-body `subtree_com`, 4 mm sole-mesh support polygon, toe/heel tipping margins, and `<observation>` XML serializer.
-- [`src/prompts.py`](src/prompts.py) — Pre-printed Harness System Contract (`raw_documented`, `raw_undocumented`, `normalized_symmetric`).
-- [`src/llm_client.py`](src/llm_client.py) — Pure-`httpx` stop-sequence client with stripped stop-tag reattachment and Gemini thinking-mode support.
-- [`src/tasks.py`](src/tasks.py) — 5 progressive benchmark tasks (`look_and_nod`, `deep_bow`, `sit_and_stand`, `peck_target`, `waddle_forward`) + evaluators.
+- [`src/prompts.py`](src/prompts.py) — Pre-printed Harness System Contract (`build_system_prompt` & `build_interactive_system_prompt` with verified zero-RL waddle & turn recipes).
+- [`src/llm_client.py`](src/llm_client.py) — Pure-`httpx` stop-sequence client with stripped stop-tag reattachment.
+- [`src/tasks.py`](src/tasks.py) — `deep_bow` benchmark specification + programmatic MuJoCo evaluator.
 - [`src/trace_export.py`](src/trace_export.py) — Exports H.264 `.mp4`, `.json` episode traces, and self-contained interactive HTML `<video>` + synced token-stream widgets.
-- [`tests/`](tests/) — Offline harness/physics unit tests (`test_harness.py`) and live generalist Gemini action-sequence tests (`test_gemini_live.py`).
-- [`assets/microduck/`](assets/microduck/) — Upstream MJCF (`robot_allcollisions.xml`), STL meshes, and Apache-2.0 `LICENSE` from [`pollen-robotics/microduck_rl`](https://github.com/pollen-robotics/microduck_rl).
+- [`tests/`](tests/) — Offline harness/physics tests (`test_harness.py`), UI server/HTTP tests (`test_ui_server.py`), and live generalist Gemini tests (`test_gemini_live.py`).
+- [`assets/microduck/`](assets/microduck/) — Upstream MJCF, STL meshes, and Apache-2.0 `LICENSE` from [`pollen-robotics/microduck_rl`](https://github.com/pollen-robotics/microduck_rl).

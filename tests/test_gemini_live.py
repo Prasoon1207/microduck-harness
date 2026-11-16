@@ -25,13 +25,12 @@ class GeminiGeneralistLiveTests(unittest.TestCase):
         self.assertEqual(client.model, "gemini-3.5-flash")
 
         step = client.generate_until_stop(
-            system_prompt='Emit <thought>...</thought> followed by <action_chunk>[{"dt": 0.4, "joints": {"head_yaw": 0.5}}]</action_chunk> and then STOP.',
+            system_prompt='Emit <action_chunk>[{"dt": 0.4, "joints": {"head_yaw": 0.5}}]</action_chunk> and then STOP.',
             messages=[{"role": "user", "content": "Turn head_yaw to +0.5 rad."}],
             stop_sequences=STOP_SEQUENCES,
         )
         self.assertEqual(step.matched_stop, "</action_chunk>")
         self.assertTrue(step.text.endswith("</action_chunk>"))
-        self.assertIn("<thought>", step.text)
 
         match = ACTION_RE.search(step.text)
         self.assertIsNotNone(match)

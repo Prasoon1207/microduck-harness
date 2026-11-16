@@ -72,14 +72,14 @@ STAND_RAW: Dict[str, float] = {
 }
 
 
-def _format_chunk(thought: str, waypoints: List[Dict[str, Any]]) -> GenerationStep:
+def _format_chunk(_note: str, waypoints: List[Dict[str, Any]]) -> GenerationStep:
     body = json.dumps(waypoints, indent=2)
-    txt = f"<thought>\n{thought.strip()}\n</thought>\n<action_chunk>\n{body}\n</action_chunk>"
+    txt = f"<action_chunk>\n{body}\n</action_chunk>"
     return GenerationStep(text=txt, matched_stop="</action_chunk>", latency_s=0.01, model="closed-loop-policy")
 
 
-def _format_done(thought: str, summary: str) -> GenerationStep:
-    txt = f"<thought>\n{thought.strip()}\n</thought>\n<done>{summary}</done>"
+def _format_done(_note: str, summary: str) -> GenerationStep:
+    txt = f"<done>{summary}</done>"
     return GenerationStep(text=txt, matched_stop="</done>", latency_s=0.01, model="closed-loop-policy")
 
 
@@ -102,50 +102,13 @@ class ClosedLoopReferenceAgent:
         stop_sequences: List[str],
     ) -> GenerationStep:
         t0 = time.perf_counter()
-        goal_text = messages[0]["content"]
         turn_num = (len(messages) + 1) // 2
         obs = _parse_latest_obs(messages)
 
-        if "turn your head" in goal_text:
-            step = self._policy_look_and_nod(turn_num, obs)
-        elif "respectful bow" in goal_text:
-            step = self._policy_deep_bow(turn_num, obs)
-        elif "deep crouch/sitting" in goal_text:
-            step = self._policy_sit_and_stand(turn_num, obs)
-        elif "red berry" in goal_text:
-            step = self._policy_peck_target(turn_num, obs)
-        else:
-            step = self._policy_waddle_forward(turn_num, obs)
-
+        step = self._policy_deep_bow(turn_num, obs)
         step.latency_s = time.perf_counter() - t0
         step.model = self.model
         return step
-
-    def _policy_look_and_nod(self, turn: int, obs: Dict[str, Any]) -> GenerationStep:
-        if turn == 1:
-            return _format_chunk(
-                f"Standing stably (toe_margin={obs['toe_margin']*1000:+.1f}mm). Pure Z-axis head_yaw rotation keeps CoM centered. "
-                "Panning head_yaw +0.72 rad left, then -0.72 rad right.",
-                [
-                    {"dt": 0.55, "joints": {"head_yaw": 0.72}},
-                    {"dt": 0.75, "joints": {"head_yaw": -0.72}},
-                ],
-            )
-        if turn == 2:
-            nod_legs = _avian_stance(delta_squat=0.18, beta_pullback=0.14)
-            return _format_chunk(
-                f"Head pan verified (head_yaw={obs['joints'].get('head_yaw', 0.0):+.2f} rad, toe_margin={obs['toe_margin']*1000:+.1f}mm). "
-                "Re-centering head_yaw=0.0 and nodding beak down (head_pitch=+1.05, neck_pitch=+0.05 with "
-                "β=+0.14 rad ankle pullback so CoM stays centered), then returning smoothly to STAND.",
-                [
-                    {"dt": 0.65, "joints": {**nod_legs, "head_yaw": 0.0, "neck_pitch": 0.05, "head_pitch": 1.05}},
-                    {"dt": 0.75, "joints": STAND_RAW},
-                ],
-            )
-        return _format_done(
-            f"Telemetry confirms bilateral yaw scan, deep nod, and clean upright recovery (trunk_z={obs['trunk_pos'][2]:.3f}m).",
-            "Completed left/right head scan and balanced nod.",
-        )
 
     def _policy_deep_bow(self, turn: int, obs: Dict[str, Any]) -> GenerationStep:
         if self.mode == "open_loop_naive":
@@ -163,193 +126,178 @@ class ClosedLoopReferenceAgent:
         if turn == 1:
             legs = _avian_stance(delta_squat=0.58, beta_pullback=0.24)
             return _format_chunk(
-                f"Initial beak_z={beak_z:.3f}m, toe_margin={obs['toe_margin']*1000:+.1f}mm. Because the 189g head is 24% of body mass, "
-                "I apply the avian flat-foot squat (δ=0.58 rad) + pelvic pullback (β=+0.24 rad on left_ankle / -0.24 on right_ankle) "
-                "while lowering neck_pitch=-0.35 and head_pitch=+1.38.",
+                f"Initial beak_z={beak_z:.3f}m, toe_margin={obs['toe_margin']*1000:+.1f}mm.",
                 [{"dt": 0.85, "joints": {**legs, "neck_pitch": -0.35, "head_pitch": 1.38}}],
             )
         if turn == 2 and beak_z > 0.095:
             beta = 0.27 if obs["toe_margin"] < 0.008 else 0.25
             legs = _avian_stance(delta_squat=0.63, beta_pullback=beta)
             return _format_chunk(
-                f"Closed-loop check: beak_z={beak_z:.3f}m, toe_margin={obs['toe_margin']*1000:+.1f}mm. "
-                f"Deepening squat to δ=0.63, β={beta:.2f} and neck_pitch=-0.38, head_pitch=+1.44.",
+                f"Closed-loop check: beak_z={beak_z:.3f}m, toe_margin={obs['toe_margin']*1000:+.1f}mm.",
                 [{"dt": 0.75, "joints": {**legs, "neck_pitch": -0.38, "head_pitch": 1.44}}],
             )
         if beak_z < 0.170:
             mid_legs = _avian_stance(delta_squat=0.32, beta_pullback=0.11)
             return _format_chunk(
-                f"Bow goal reached cleanly (beak_z={beak_z:.3f}m <= 0.095m, toe_margin={obs['toe_margin']*1000:+.1f}mm, both feet flat)! "
-                "Scaling pelvic pullback β down in lockstep with retracting the heavy head so CoM stays centered.",
+                f"Bow goal reached cleanly (beak_z={beak_z:.3f}m <= 0.095m)!",
                 [
                     {"dt": 0.70, "joints": {**mid_legs, "neck_pitch": 0.10, "head_pitch": 0.75}},
                     {"dt": 0.85, "joints": STAND_RAW},
                 ],
             )
         return _format_done(
-            f"Upright posture verified: beak_z={beak_z:.3f}m >= 0.170m, trunk_z={obs['trunk_pos'][2]:.3f}m, fallen=false.",
+            f"Upright posture verified: beak_z={beak_z:.3f}m >= 0.170m.",
             "Completed counter-balanced deep bow below 9.5cm and returned upright.",
         )
 
-    def _policy_sit_and_stand(self, turn: int, obs: Dict[str, Any]) -> GenerationStep:
-        tz = obs["trunk_pos"][2]
-        if turn == 1:
-            legs_mid = _avian_stance(delta_squat=0.40)
-            legs_low = _avian_stance(delta_squat=0.66)
-            return _format_chunk(
-                f"Starting at trunk_z={tz:.3f}m. Using the avian 3-link flat-foot squat invariant "
-                "(left_hip=-0.458+δ, left_knee=+2δ, left_ankle=+0.453+δ; mirrored on right) to lower trunk_z "
-                "straight down to ~0.075m (<=0.088m) with zero pitch/roll.",
-                [
-                    {"dt": 0.50, "joints": {**legs_mid, "neck_pitch": 0.30, "head_pitch": 0.45}},
-                    {"dt": 0.60, "joints": {**legs_low, "neck_pitch": 0.25, "head_pitch": 0.50}},
-                ],
-            )
-        if tz < 0.110:
-            legs_mid = _avian_stance(delta_squat=0.30)
-            return _format_chunk(
-                f"Deep seated crouch confirmed at trunk_z={tz:.3f}m <= 0.088m (toe_margin={obs['toe_margin']*1000:+.1f}mm). "
-                "Pausing briefly, then extending symmetrically back to STAND.",
-                [
-                    {"dt": 0.25, "joints": _avian_stance(delta_squat=0.66)},
-                    {"dt": 0.55, "joints": legs_mid},
-                    {"dt": 0.65, "joints": STAND_RAW},
-                ],
-            )
-        return _format_done(
-            f"Standing height restored cleanly: trunk_z={tz:.3f}m >= 0.110m, fallen=false.",
-            "Lowered smoothly into deep flat-footed squat (z=0.075m) and stood back up.",
-        )
 
-    def _policy_peck_target(self, turn: int, obs: Dict[str, Any]) -> GenerationStep:
-        if self.mode == "open_loop_naive":
-            return _format_chunk(
-                "Naive open-loop lunge toward berry without pelvic CoM pullback: pitching neck_pitch=-1.15, head_pitch=+1.40, hip_pitch=∓0.75.",
-                [
-                    {
-                        "dt": 0.65,
-                        "joints": {
-                            "left_hip_pitch": -0.75,
-                            "right_hip_pitch": 0.75,
-                            "neck_pitch": -1.15,
-                            "head_pitch": 1.40,
-                            "head_yaw": 0.25,
-                        },
-                    }
-                ],
-            )
+def _waddle_leg(side: str, delta: float, stride: float = 0.0, roll: float = 0.0, yaw: float = 0.0) -> Dict[str, float]:
+    if side == "left":
+        return {
+            "left_hip_yaw": round(yaw, 2),
+            "left_hip_roll": round(-0.087 + roll, 2),
+            "left_hip_pitch": round(-0.458 + delta - stride, 2),
+            "left_knee": round(2.0 * delta, 2),
+            "left_ankle": round(0.453 + delta + stride, 2),
+        }
+    return {
+        "right_hip_yaw": round(yaw, 2),
+        "right_hip_roll": round(0.087 + roll, 2),
+        "right_hip_pitch": round(0.458 - delta + stride, 2),
+        "right_knee": round(-2.0 * delta, 2),
+        "right_ankle": round(-0.453 - delta - stride, 2),
+    }
 
-        best_d = obs.get("best_dist", 9.9)
+
+class InteractiveDemoAgent:
+    """Offline closed-loop policy operating strictly through `<instruction>` + `<observation>` XML."""
+
+    model = "closed-loop-demo"
+
+    @staticmethod
+    def _latest_instruction_and_chunk_count(messages: List[Dict[str, str]]) -> tuple[str, int]:
+        instr = ""
+        chunks_since_instr = 0
+        for idx in range(len(messages) - 1, -1, -1):
+            m = messages[idx]
+            if m["role"] == "assistant" and "<action_chunk>" in m["content"]:
+                chunks_since_instr += 1
+            if m["role"] == "user":
+                im = re.search(r"<(?:instruction|goal)>(.*?)</(?:instruction|goal)>", m["content"], re.DOTALL)
+                if im:
+                    instr = im.group(1).strip()
+                    break
+        return instr, chunks_since_instr
+
+    def generate_until_stop(
+        self,
+        system_prompt: str,
+        messages: List[Dict[str, str]],
+        stop_sequences: List[str],
+    ) -> GenerationStep:
+        t0 = time.perf_counter()
+        obs = _parse_latest_obs(messages)
+        rpy_m = re.search(r"trunk_rpy_deg:\s*\[roll=([+-]?[0-9.]+),\s*pitch=([+-]?[0-9.]+),\s*yaw=([+-]?[0-9.]+)\]", obs["raw"])
+        yaw_deg = float(rpy_m.group(3)) if rpy_m else 0.0
+        instr, done_chunks = self._latest_instruction_and_chunk_count(messages)
+        low = instr.lower()
+
+        step = self._route(low, done_chunks, obs, yaw_deg)
+        step.latency_s = time.perf_counter() - t0
+        step.model = self.model
+        return step
+
+    def _route(self, low: str, done_chunks: int, obs: Dict[str, Any], yaw_deg: float) -> GenerationStep:
+        tx, ty, tz = obs["trunk_pos"]
         mx, my, mz = obs["mouth_tip"]
-        gx, gy, gz = obs.get("target_xyz", [0.046, 0.018, 0.074])
-        dx, dy, dz = gx - mx, gy - my, gz - mz
 
-        if best_d > 0.020 and turn == 1:
-            # Stage 1: cautious approach to ~3.4cm above berry so Turn 2 demonstrates genuine closed-loop 3D refinement!
-            legs = _avian_stance(delta_squat=0.46, beta_pullback=0.20)
-            return _format_chunk(
-                f"Berry at [{gx:.3f}, {gy:.3f}, {gz:.3f}], beak at [{mx:.3f}, {my:.3f}, {mz:.3f}] "
-                f"(delta=[{dx:+.3f}, {dy:+.3f}, {dz:+.3f}]m). Stage 1: lower into counter-balanced avian squat "
-                "(δ=0.46, pelvic pullback β=+0.20) with initial yaw=+0.20 rad and neck_pitch=-0.26, head_pitch=+1.24 "
-                "to bring beak near target while inspecting live CoM toe_margin.",
-                [
-                    {
-                        "dt": 0.85,
-                        "joints": {
-                            **legs,
-                            "neck_pitch": -0.26,
-                            "head_pitch": 1.24,
-                            "head_yaw": 0.20,
-                        },
-                    }
-                ],
-            )
+        # Number parser (e.g. "3 steps" / "twice" / "two")
+        n_req = 1
+        if any(w in low for w in ("three", "3")):
+            n_req = 3
+        elif any(w in low for w in ("two", "twice", "couple", "2")):
+            n_req = 2
 
-        if best_d > 0.020 and turn <= 4:
-            j = obs["joints"]
-            cur_yaw = j.get("head_yaw", 0.20)
-            cur_np = j.get("neck_pitch", -0.26)
-            cur_hp = j.get("head_pitch", 1.24)
+        if "bow" in low:
+            if done_chunks == 0:
+                legs = _avian_stance(delta_squat=0.58, beta_pullback=0.24)
+                return _format_chunk("bow down", [{"dt": 0.85, "joints": {**legs, "neck_pitch": -0.35, "head_pitch": 1.38}}])
+            if done_chunks == 1:
+                mid = _avian_stance(delta_squat=0.28, beta_pullback=0.10)
+                return _format_chunk(
+                    "return upright",
+                    [
+                        {"dt": 0.65, "joints": {**mid, "neck_pitch": 0.10, "head_pitch": 0.75}},
+                        {"dt": 0.75, "joints": STAND_RAW},
+                    ],
+                )
+            return _format_done("done", f"Completed a counter-balanced deep bow and returned cleanly to STAND (beak z={mz:.3f} m, toe_margin={obs['toe_margin']*1000:+.0f} mm).")
 
-            # Closed-loop proportional Jacobian step from <observation> residual delta_xyz & toe_margin
-            new_yaw = max(-0.8, min(0.8, cur_yaw + dy * 16.0))
-            new_np = max(-0.42, min(0.10, cur_np - dx * 4.5))
-            new_hp = min(1.48, max(0.80, cur_hp - dz * 6.8))
-            beta = 0.26 if obs["toe_margin"] < 0.008 else 0.25
-            legs = _avian_stance(delta_squat=0.63, beta_pullback=beta)
+        if any(w in low for w in ("waddle", "walk", "forward", "ahead", "step")):
+            back = any(w in low for w in ("back", "backward", "reverse"))
+            s = -0.18 if back else 0.22
+            steps = max(n_req, 2 if "walk" in low or "waddle" in low else 1)
+            if done_chunks < steps:
+                wps = [
+                    {"dt": 0.28, "joints": {**_waddle_leg("left", 0.10, -s * 0.6, +0.28), **_waddle_leg("right", 0.38, +s, +0.28), "neck_pitch": 0.35, "head_pitch": 0.35, "head_yaw": 0.35, "head_roll": -0.25}},
+                    {"dt": 0.28, "joints": {**_waddle_leg("left", 0.15, -s * 0.6, 0.0), **_waddle_leg("right", 0.15, +s * 0.8, 0.0), "head_yaw": 0.0, "head_roll": 0.0}},
+                    {"dt": 0.28, "joints": {**_waddle_leg("left", 0.38, +s, -0.28), **_waddle_leg("right", 0.10, -s * 0.6, -0.28), "head_yaw": -0.35, "head_roll": +0.25}},
+                    {"dt": 0.28, "joints": {**_waddle_leg("left", 0.15, +s * 0.8, 0.0), **_waddle_leg("right", 0.15, -s * 0.6, 0.0), "head_yaw": 0.0, "head_roll": 0.0}},
+                    {"dt": 0.30, "joints": {**_waddle_leg("left", 0.10), **_waddle_leg("right", 0.10), "head_yaw": 0.0, "head_roll": 0.0}},
+                ]
+                return _format_chunk("waddle step", wps)
+            direction = "backward" if back else "forward"
+            return _format_done("done", f"Waddled {steps} step(s) {direction} cleanly — trunk is now at [{tx:+.3f}, {ty:+.3f}, {tz:.3f}] m (yaw {yaw_deg:+.1f}°).")
 
-            return _format_chunk(
-                f"Closed-loop telemetry: beak=[{mx:.3f}, {my:.3f}, {mz:.3f}], residual delta=[{dx:+.3f}, {dy:+.3f}, {dz:+.3f}]m "
-                f"(dist={obs.get('dist', 0.0)*100:.1f}cm), toe_margin={obs['toe_margin']*1000:+.1f}mm. "
-                f"Refining IK from residual error: δ=0.63, β={beta:.2f}, neck_pitch->{new_np:+.2f}, head_pitch->{new_hp:+.2f}, head_yaw->{new_yaw:+.2f}.",
-                [
-                    {
-                        "dt": 0.85,
-                        "joints": {
-                            **legs,
-                            "neck_pitch": round(new_np, 3),
-                            "head_pitch": round(new_hp, 3),
-                            "head_yaw": round(new_yaw, 3),
-                        },
-                    }
-                ],
-            )
+        if "turn" in low or "rotate" in low or "spin" in low:
+            go_right = "right" in low and "left" not in low
+            if done_chunks < n_req:
+                if go_right:
+                    wps = [
+                        {"dt": 0.26, "joints": {**_waddle_leg("left", 0.10, roll=+0.28, yaw=0.0), **_waddle_leg("right", 0.38, roll=+0.28, yaw=-0.32), "head_yaw": 0.30, "head_roll": -0.25}},
+                        {"dt": 0.26, "joints": {**_waddle_leg("left", 0.12, roll=+0.22, yaw=+0.32), **_waddle_leg("right", 0.15, roll=0.0, yaw=-0.32), "head_yaw": 0.0, "head_roll": 0.0}},
+                        {"dt": 0.26, "joints": {**_waddle_leg("left", 0.38, roll=-0.28, yaw=0.0), **_waddle_leg("right", 0.10, roll=-0.28, yaw=+0.16), "head_yaw": -0.30, "head_roll": +0.25}},
+                        {"dt": 0.30, "joints": {**_waddle_leg("left", 0.10), **_waddle_leg("right", 0.10), "head_yaw": 0.0, "head_roll": 0.0}},
+                    ]
+                else:
+                    wps = [
+                        {"dt": 0.26, "joints": {**_waddle_leg("right", 0.10, roll=-0.28, yaw=0.0), **_waddle_leg("left", 0.38, roll=-0.28, yaw=+0.32), "head_yaw": -0.30, "head_roll": +0.25}},
+                        {"dt": 0.26, "joints": {**_waddle_leg("right", 0.12, roll=-0.22, yaw=-0.32), **_waddle_leg("left", 0.15, roll=0.0, yaw=+0.32), "head_yaw": 0.0, "head_roll": 0.0}},
+                        {"dt": 0.26, "joints": {**_waddle_leg("right", 0.38, roll=+0.28, yaw=0.0), **_waddle_leg("left", 0.10, roll=+0.28, yaw=-0.16), "head_yaw": +0.30, "head_roll": -0.25}},
+                        {"dt": 0.30, "joints": {**_waddle_leg("left", 0.10), **_waddle_leg("right", 0.10), "head_yaw": 0.0, "head_roll": 0.0}},
+                    ]
+                return _format_chunk("turn", wps)
+            side_lbl = "right" if go_right else "left"
+            return _format_done("done", f"Turned {side_lbl} in place — heading yaw is now {yaw_deg:+.1f}° with both feet flat.")
 
-        if obs["trunk_pos"][2] < 0.110:
-            mid_legs = _avian_stance(delta_squat=0.32, beta_pullback=0.11)
-            return _format_chunk(
-                f"Berry pecked cleanly! (best_so_far={best_d*100:.1f}cm <= 2.0cm, toe_margin={obs['toe_margin']*1000:+.1f}mm). "
-                "Scaling pelvic pullback β down in lockstep with head retraction back to upright STAND.",
-                [
-                    {"dt": 0.70, "joints": {**mid_legs, "neck_pitch": 0.10, "head_pitch": 0.75, "head_yaw": 0.0}},
-                    {"dt": 0.85, "joints": STAND_RAW},
-                ],
-            )
+        if "squat" in low or "crouch" in low:
+            if done_chunks == 0:
+                legs = _avian_stance(delta_squat=0.48, beta_pullback=0.06)
+                return _format_chunk("squat", [{"dt": 0.70, "joints": {**legs, "neck_pitch": 0.25, "head_pitch": 0.45}}])
+            return _format_done("done", f"Holding a balanced flat-foot avian squat at trunk z={tz:.3f} m (toe_margin={obs['toe_margin']*1000:+.0f} mm).")
+
+        if "stand" in low or "upright" in low or "reset" in low:
+            if done_chunks == 0 and tz < 0.112:
+                return _format_chunk("stand", [{"dt": 0.75, "joints": STAND_RAW}])
+            if done_chunks == 0:
+                return _format_chunk("stand", [{"dt": 0.55, "joints": STAND_RAW}])
+            return _format_done("done", f"Standing tall and centered at trunk z={tz:.3f} m, beak z={mz:.3f} m.")
+
+        if any(w in low for w in ("look", "nod", "shake", "tilt", "wave", "hello", "hi")):
+            if done_chunks == 0:
+                brace = _avian_stance(delta_squat=0.16, beta_pullback=0.05)
+                wps = [
+                    {"dt": 0.55, "joints": {**brace, "head_yaw": 0.55, "head_roll": 0.12}},
+                    {"dt": 0.65, "joints": {**brace, "head_yaw": -0.55, "head_roll": -0.12}},
+                    {"dt": 0.45, "joints": {**brace, "head_yaw": 0.0, "head_roll": 0.0, "head_pitch": 0.85}},
+                    {"dt": 0.45, "joints": {**brace, "head_pitch": 0.25}},
+                    {"dt": 0.50, "joints": STAND_RAW},
+                ]
+                return _format_chunk("look and nod", wps)
+            return _format_done("done", f"Looked left and right, nodded, and centered gaze (beak z={mz:.3f} m).")
 
         return _format_done(
-            f"Target berry pecked within {best_d*100:.1f}cm and returned to upright STAND (trunk_z={obs['trunk_pos'][2]:.3f}m).",
-            f"Pecked 3D berry target (min_dist={best_d*100:.1f}cm) via closed-loop CoM & IK feedback and stood back up.",
+            "status",
+            f"Ready! Trunk at [{tx:+.3f}, {ty:+.3f}, {tz:.3f}] m, beak at z={mz:.3f} m, toe_margin={obs['toe_margin']*1000:+.0f} mm.",
         )
 
-    def _policy_waddle_forward(self, turn: int, obs: Dict[str, Any]) -> GenerationStep:
-        """Quasi-static alternating step attempt exposing the 50 Hz underactuated bipedal walking boundary."""
-        if turn == 1:
-            shift_left = _avian_stance(delta_squat=0.22, beta_pullback=0.05)
-            shift_left["left_hip_roll"] = -0.26
-            shift_left["right_hip_roll"] = -0.20
-            swing_right = dict(shift_left)
-            swing_right["right_knee"] = -0.85
-            swing_right["right_hip_pitch"] = 0.50
-            swing_right["right_ankle"] = -0.85
-            swing_right["left_ankle"] = 0.52
-            return _format_chunk(
-                "Attempting quasi-static bipedal step at chunk timescale (~0.4s/waypoint): roll CoM toward left foot, "
-                "flex right hock to lift right foot, and push forward.",
-                [
-                    {"dt": 0.40, "joints": shift_left},
-                    {"dt": 0.40, "joints": swing_right},
-                ],
-            )
-        if turn == 2:
-            shift_right = _avian_stance(delta_squat=0.22, beta_pullback=0.05)
-            shift_right["left_hip_roll"] = 0.20
-            shift_right["right_hip_roll"] = 0.26
-            swing_left = dict(shift_right)
-            swing_left["left_knee"] = 0.85
-            swing_left["left_hip_pitch"] = -0.50
-            swing_left["left_ankle"] = 0.85
-            swing_left["right_ankle"] = -0.52
-            return _format_chunk(
-                f"After step 1: trunk_x={obs['trunk_pos'][0]*100:+.1f}cm, toe_margin={obs['toe_margin']*1000:+.1f}mm. "
-                "Attempting weight transfer onto right foot and swinging left leg forward.",
-                [
-                    {"dt": 0.40, "joints": shift_right},
-                    {"dt": 0.40, "joints": swing_left},
-                ],
-            )
-        lunge = _avian_stance(delta_squat=0.20, beta_pullback=-0.18)
-        return _format_chunk(
-            f"Trunk at x={obs['trunk_pos'][0]*100:+.1f}cm — open-loop 0.4s chunks cannot stabilize single-foot stance without 50Hz IMU feedback. "
-            "Attempting forward ankle push.",
-            [{"dt": 0.45, "joints": lunge}],
-        )

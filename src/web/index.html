@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MicroDuck Harness</title>
+  <meta name="description" content="Interactive MuJoCo harness interface for MicroDuck." />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1>MicroDuck Harness</h1>
+        <span id="sim-status-text" class="status-text">Ready</span>
+      </div>
+
+      <div class="topbar-right">
+        <select id="provider-select" class="ctrl-select" aria-label="Provider"></select>
+        <input
+          id="model-name-input"
+          class="ctrl-input"
+          type="text"
+          list="model-suggestions"
+          spellcheck="false"
+          aria-label="Model"
+          placeholder="model"
+        />
+        <datalist id="model-suggestions"></datalist>
+        <div class="sep" aria-hidden="true"></div>
+        <button id="btn-reset-stand" class="btn" type="button">Stand</button>
+        <button id="btn-reset-sit" class="btn" type="button">Sit</button>
+        <button id="btn-clear-chat" class="btn" type="button">Clear</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="sim-pane" aria-label="Simulation">
+        <div class="cam-bar">
+          <div class="cam-tabs" role="tablist">
+            <button id="cam-btn-split" class="cam-tab is-active" data-mode="split" type="button">Split</button>
+            <button id="cam-btn-studio" class="cam-tab" data-mode="studio" type="button">3/4</button>
+            <button id="cam-btn-front" class="cam-tab" data-mode="front" type="button">Front</button>
+            <button id="cam-btn-side" class="cam-tab" data-mode="side" type="button">Side</button>
+            <button id="cam-btn-pov" class="cam-tab" data-mode="pov" type="button">POV</button>
+          </div>
+          <span id="orbit-hint-badge" class="cam-hint">Drag to orbit, scroll to zoom</span>
+        </div>
+
+        <div id="viewport-drag-surface" class="viewport">
+          <div id="fallen-overlay-banner" class="fallen-bar" hidden>
+            <span>Robot fallen</span>
+            <button id="btn-recover-stand" class="btn btn-stop" type="button">Reset</button>
+          </div>
+          <img id="sim-stream-img" src="/api/frame.jpg" alt="MicroDuck simulation" draggable="false" />
+        </div>
+
+        <div class="telem-strip" aria-label="Telemetry">
+          <div class="telem-item"><span>t</span><b id="telem-time">0.00s</b></div>
+          <div class="telem-item"><span>pos</span><b id="telem-trunk">0.002, 0.000, 0.116</b></div>
+          <div class="telem-item"><span>beak z</span><b id="telem-beak">0.218m</b></div>
+          <div class="telem-item"><span>yaw</span><b id="telem-yaw">+0.0&deg;</b></div>
+          <div class="telem-item"><span>toe/heel</span><b id="telem-margins">+30 / +22 mm</b></div>
+        </div>
+      </section>
+
+      <section class="chat-pane" aria-label="Chat">
+        <div id="chat-feed" class="chat-feed">
+          <div id="empty-welcome" class="empty-note">
+            <p>Send a plain-English instruction to control MicroDuck in 50 Hz MuJoCo.</p>
+            <div class="prompt-examples">
+              <button
+                id="chip-deep-bow"
+                class="example-btn"
+                type="button"
+                data-prompt="Perform a deep bow with your beak below 9.5 cm while keeping both feet flat, then return upright."
+              >
+                Deep bow
+              </button>
+              <button
+                id="chip-look-nod"
+                class="example-btn"
+                type="button"
+                data-prompt="Look left, look right, and nod twice."
+              >
+                Look &amp; nod
+              </button>
+              <button
+                id="chip-waddle"
+                class="example-btn"
+                type="button"
+                data-prompt="Waddle forward two careful steps along +X while staying balanced."
+              >
+                Waddle forward
+              </button>
+              <button
+                id="chip-squat"
+                class="example-btn"
+                type="button"
+                data-prompt="Lower into a balanced flat-footed squat around trunk z = 0.088 m and hold."
+              >
+                Squat &amp; hold
+              </button>
+              <button
+                id="chip-turn-left"
+                class="example-btn"
+                type="button"
+                data-prompt="Turn left in place once and stay balanced."
+              >
+                Turn left
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <form id="chat-composer-form" class="composer">
+          <textarea
+            id="chat-prompt-input"
+            rows="1"
+            placeholder="Instruct MicroDuck..."
+            aria-label="Instruction"
+          ></textarea>
+          <button id="btn-send-prompt" class="btn btn-primary" type="submit">Send</button>
+          <button id="btn-stop-turn" class="btn btn-stop" type="button" hidden>Stop</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

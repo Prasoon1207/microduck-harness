@@ -71,27 +71,25 @@ Valid joint names, ranges `[min, max]`, and `STAND` values:
     if include_balance_margin:
         balance_guide = """
 ## 3. Closed-Loop Control Strategy
-- Prefer **short, incremental action chunks (1–2 waypoints, `dt` = 0.35s–0.60s)** when performing delicate balance or 3D beak reaching so you can inspect the resulting `<observation>` and correct `delta_xyz` and `toe_margin` in closed loop!
+- Prefer **short, incremental action chunks (1–2 waypoints, `dt` = 0.35s–0.85s)** when performing delicate balance or deep bowing so you can inspect the resulting `<observation>` and check `mouth_tip_xyz_m` and `toe_margin` in closed loop!
 - Always check `toe_margin` and `heel_margin` before lowering your beak further. Keep `toe_margin > 0.012 m` whenever standing on your feet."""
 
     protocol = """
 ## 4. Strict Harness Output Protocol
-On EVERY turn, emit brief physical reasoning inside `<thought>...</thought>` followed IMMEDIATELY by EITHER an `<action_chunk>` OR `<done>`:
+On EVERY turn, emit EITHER an `<action_chunk>` OR `<done>`:
 
 Option A — Execute a 14-D servo trajectory chunk (harness stops generation at `</action_chunk>`, steps MuJoCo at 50 Hz, and replies with `<observation>`):
-<thought>
-Check current pose, CoM balance margin, and compute incremental joint targets.
-</thought>
 <action_chunk>
 [
   {
-    "dt": 0.45,
+    "dt": 0.60,
     "joints": {
-      "left_hip_pitch": -0.62,
-      "right_hip_pitch": 0.62,
-      "left_knee": 0.55,
-      "right_knee": -0.55,
-      "neck_pitch": -0.10
+      "left_hip_pitch": -0.16,
+      "right_hip_pitch": 0.16,
+      "left_knee": 0.60,
+      "right_knee": -0.60,
+      "left_ankle": 0.75,
+      "right_ankle": -0.75
     }
   }
 ]
@@ -100,9 +98,58 @@ Check current pose, CoM balance margin, and compute incremental joint targets.
 *(Note: Any joint omitted from `"joints"` smoothly holds its current target angle.)*
 
 Option B — Declare task completion ONLY AFTER `<observation>` confirms all goal criteria (including returning upright if requested) are satisfied:
-<thought>
-Verify from the latest observation that all task targets and final posture constraints were achieved.
-</thought>
 <done>Concise summary of the completed motion and final state.</done>"""
 
     return "\n".join([header, kinematics, balance_guide, protocol])
+
+
+def build_interactive_system_prompt(
+    coordinate_mode: str = "raw_documented",
+    include_balance_margin: bool = True,
+) -> str:
+    """Construct the system contract for interactive multi-turn natural-language control in the UI."""
+    base = build_system_prompt(
+        coordinate_mode=coordinate_mode,
+        include_balance_margin=include_balance_margin,
+    )
+    if coordinate_mode != "raw_documented":
+        locomotion_extra = ""
+    else:
+        locomotion_extra = """
+## 5. Verified Zero-RL Motion Reference (50 Hz MuJoCo Tested)
+- **CRITICAL BOWING & RECOVERY RULE:** NEVER pitch `neck_pitch < -0.10` with straight legs (`knee ≈ 0`) or snap legs straight before retracting the heavy head!
+  1. **Bow Down (1-wp chunk):** `{"dt": 0.85, "joints": {"left_hip_pitch": -0.12, "right_hip_pitch": 0.12, "left_knee": 1.16, "right_knee": -1.16, "left_ankle": 1.27, "right_ankle": -1.27, "neck_pitch": -0.35, "head_pitch": 1.38}}`
+  2. **Inspect `<observation>`**, then **Lockstep Return Upright (2-wp chunk — retract head first as legs unbend!):**
+     WP1: `{"dt": 0.70, "joints": {"left_hip_pitch": -0.25, "right_hip_pitch": 0.25, "left_knee": 0.64, "right_knee": -0.64, "left_ankle": 0.88, "right_ankle": -0.88, "neck_pitch": 0.10, "head_pitch": 0.75}}`
+     WP2: `{"dt": 0.85, "joints": {"left_hip_pitch": -0.458, "right_hip_pitch": 0.458, "left_knee": 0.0, "right_knee": 0.0, "left_ankle": 0.453, "right_ankle": -0.453, "neck_pitch": 0.349, "head_pitch": 0.349}}`
+
+- **Forward Waddle Step (~2.5 cm `+X` per 5-waypoint `<action_chunk>`; emit ONE step chunk per turn and check `<observation>` between steps!):**
+  - WP1 (`dt: 0.28`): `{"left_hip_roll": 0.19, "right_hip_roll": 0.37, "left_hip_pitch": -0.23, "left_knee": 0.20, "left_ankle": 0.42, "right_hip_pitch": 0.30, "right_knee": -0.76, "right_ankle": -1.05, "neck_pitch": 0.35, "head_pitch": 0.35, "head_yaw": 0.35, "head_roll": -0.25}`
+  - WP2 (`dt: 0.28`): `{"left_hip_roll": -0.09, "right_hip_roll": 0.09, "left_hip_pitch": -0.18, "left_knee": 0.30, "left_ankle": 0.47, "right_hip_pitch": 0.49, "right_knee": -0.30, "right_ankle": -0.78, "head_yaw": 0.0, "head_roll": 0.0}`
+  - WP3 (`dt: 0.28`): `{"left_hip_roll": -0.37, "right_hip_roll": -0.19, "left_hip_pitch": -0.30, "left_knee": 0.76, "left_ankle": 1.05, "right_hip_pitch": 0.23, "right_knee": -0.20, "right_ankle": -0.42, "head_yaw": -0.35, "head_roll": 0.25}`
+  - WP4 (`dt: 0.28`): `{"left_hip_roll": -0.09, "right_hip_roll": 0.09, "left_hip_pitch": -0.49, "left_knee": 0.30, "left_ankle": 0.78, "right_hip_pitch": 0.18, "right_knee": -0.30, "right_ankle": -0.47, "head_yaw": 0.0, "head_roll": 0.0}`
+  - WP5 (`dt: 0.30`): `{"left_hip_roll": -0.09, "right_hip_roll": 0.09, "left_hip_pitch": -0.36, "left_knee": 0.20, "left_ankle": 0.55, "right_hip_pitch": 0.36, "right_knee": -0.20, "right_ankle": -0.55, "head_yaw": 0.0, "head_roll": 0.0}`
+  *(For a backward step, keep the same rock/knee sequence but swap swing/stance hip_pitch & ankle forward/back offsets.)*
+
+- **Turn In Place (~15° per 4-waypoint `<action_chunk>` — note both `left_hip_yaw` and `right_hip_yaw` share world axis `-Z`):**
+  - **Turn LEFT (`+yaw`):**
+    WP1 (`dt: 0.26`): `{"right_hip_roll": -0.19, "right_hip_pitch": 0.36, "right_knee": -0.20, "right_ankle": -0.55, "right_hip_yaw": 0.0, "left_hip_roll": -0.37, "left_hip_pitch": -0.08, "left_knee": 0.76, "left_ankle": 0.83, "left_hip_yaw": 0.32, "head_yaw": -0.30, "head_roll": 0.25}`
+    WP2 (`dt: 0.26`): `{"right_hip_roll": -0.13, "right_hip_pitch": 0.34, "right_knee": -0.24, "right_ankle": -0.57, "right_hip_yaw": -0.32, "left_hip_roll": -0.09, "left_hip_pitch": -0.31, "left_knee": 0.30, "left_ankle": 0.60, "left_hip_yaw": 0.32, "head_yaw": 0.0, "head_roll": 0.0}`
+    WP3 (`dt: 0.26`): `{"right_hip_roll": 0.37, "right_hip_pitch": 0.08, "right_knee": -0.76, "right_ankle": -0.83, "right_hip_yaw": 0.0, "left_hip_roll": 0.19, "left_hip_pitch": -0.36, "left_knee": 0.20, "left_ankle": 0.55, "left_hip_yaw": -0.16, "head_yaw": 0.30, "head_roll": -0.25}`
+    WP4 (`dt: 0.30`): `{"left_hip_yaw": 0.0, "right_hip_yaw": 0.0, "left_hip_roll": -0.09, "right_hip_roll": 0.09, "left_hip_pitch": -0.36, "right_hip_pitch": 0.36, "left_knee": 0.20, "right_knee": -0.20, "left_ankle": 0.55, "right_ankle": -0.55, "head_yaw": 0.0, "head_roll": 0.0}`
+  - **Turn RIGHT (`-yaw`):**
+    WP1 (`dt: 0.26`): `{"left_hip_roll": 0.19, "left_hip_pitch": -0.36, "left_knee": 0.20, "left_ankle": 0.55, "left_hip_yaw": 0.0, "right_hip_roll": 0.37, "right_hip_pitch": 0.08, "right_knee": -0.76, "right_ankle": -0.83, "right_hip_yaw": -0.32, "head_yaw": 0.30, "head_roll": -0.25}`
+    WP2 (`dt: 0.26`): `{"left_hip_roll": 0.13, "left_hip_pitch": -0.34, "left_knee": 0.24, "left_ankle": 0.57, "left_hip_yaw": 0.32, "right_hip_roll": 0.09, "right_hip_pitch": 0.31, "right_knee": -0.30, "right_ankle": -0.60, "right_hip_yaw": -0.32, "head_yaw": 0.0, "head_roll": 0.0}`
+    WP3 (`dt: 0.26`): `{"left_hip_roll": -0.37, "left_hip_pitch": -0.08, "left_knee": 0.76, "left_ankle": 0.83, "left_hip_yaw": 0.0, "right_hip_roll": -0.19, "right_hip_pitch": 0.36, "right_knee": -0.20, "right_ankle": -0.55, "right_hip_yaw": 0.16, "head_yaw": -0.30, "head_roll": 0.25}`
+    WP4 (`dt: 0.30`): `{"left_hip_yaw": 0.0, "right_hip_yaw": 0.0, "left_hip_roll": -0.09, "right_hip_roll": 0.09, "left_hip_pitch": -0.36, "right_hip_pitch": 0.36, "left_knee": 0.20, "right_knee": -0.20, "left_ankle": 0.55, "right_ankle": -0.55, "head_yaw": 0.0, "head_roll": 0.0}`"""
+
+    interactive_rules = """
+## 6. Interactive Session Behavior
+- A human user is interacting with you live across multiple `<instruction>` messages while watching your physical MicroDuck body in real time.
+- Start from your **actual current pose** reported in the latest `<observation>`!
+- If the user asks you to **hold** a pose (e.g. "squat down and hold", "look left"), stay in that final pose and emit `<done>` once `<observation>` confirms it. If they ask for a transient gesture (e.g. "do a bow", "nod twice", "shake your head"), return smoothly to an upright stance before emitting `<done>`.
+- If the user asks a pure status/proprioception question requiring zero motion (e.g. "where is your beak right now?"), answer directly inside `<done>...</done>` using the latest `<observation>`.
+- Write a friendly, concise, telemetry-grounded message inside `<done>...</done>` summarizing what you physically did (mentioning relevant physical measurements like beak height, yaw, or distance moved)."""
+
+    return "\n".join([base, locomotion_extra, interactive_rules])
+

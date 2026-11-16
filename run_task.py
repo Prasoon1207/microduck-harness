@@ -32,9 +32,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run MicroDuck Zero-Shot MuJoCo Robotics Harness.")
     parser.add_argument(
         "--task",
-        default="peck_target",
+        default="deep_bow",
         choices=[*TASKS.keys(), "all"],
-        help="Task ID to execute (or 'all' to run the full benchmark suite).",
+        help="Task ID to execute (default: 'deep_bow').",
     )
     parser.add_argument(
         "--provider",

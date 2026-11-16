@@ -45,7 +45,6 @@ def serialize_episode_json(result: EpisodeResult, fps: int = 25) -> Dict[str, An
                 "turn_idx": t.turn_idx,
                 "t_start_s": round(f0 / float(fps), 2),
                 "t_end_s": round(f1 / float(fps), 2),
-                "thought": t.thought,
                 "waypoints": [dataclasses.asdict(wp) for wp in t.waypoints],
                 "observation_xml": t.observation_xml,
                 "status": t.telemetry.status,
@@ -95,18 +94,13 @@ def build_embeddable_trace_html(
     for t in trace_data["turns"]:
         t0, t1 = t["t_start_s"], max(t["t_end_s"], t["t_start_s"] + 0.05)
         idx = t["turn_idx"]
-        thought_esc = html.escape(t["thought"])
         if t["is_done"]:
             done_esc = html.escape(t["done_summary"])
-            body = (
-                f'<div class="md-thought"><b>&lt;thought&gt;</b> {thought_esc}</div>'
-                f'<div class="md-done"><b>&lt;done&gt;</b> {done_esc} <i>(STOP intercepted)</i></div>'
-            )
+            body = f'<div class="md-done"><b>&lt;done&gt;</b> {done_esc} <i>(STOP intercepted)</i></div>'
         else:
             wp_json = html.escape(json.dumps(t["waypoints"], indent=2))
             obs_esc = html.escape(t["observation_xml"])
             body = (
-                f'<div class="md-thought"><b>&lt;thought&gt;</b> {thought_esc}</div>'
                 f'<pre class="md-act">&lt;action_chunk&gt;\n{wp_json}\n&lt;/action_chunk&gt;  &larr; STOP intercepted</pre>'
                 f'<pre class="md-obs">{obs_esc}</pre>'
             )
@@ -187,7 +181,6 @@ def export_episode_bundle(
     standalone = (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
         "<style>body{font-family:Lato,sans-serif;max-width:800px;margin:24px auto;padding:0 16px;font-size:14px;}"
-        ".md-thought{font-size:12.5px;color:#222;margin-bottom:4px;}"
         ".md-act{font-size:11.5px;background:#fff8eb;padding:6px;margin:4px 0;border-radius:3px;overflow-x:auto;}"
         ".md-obs{font-size:11.5px;background:#f1f5f9;padding:6px;margin:4px 0;border-radius:3px;overflow-x:auto;}"
         ".md-done{font-size:12.5px;color:#137333;font-weight:600;}"

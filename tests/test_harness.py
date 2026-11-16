@@ -34,16 +34,13 @@ class _SelfRepairMockAgent:
 
         if self.calls == 1:
             # Invalid joint name `left_wing_flap` -> should trigger `<harness_error>` without crashing MuJoCo
-            bad = '<thought>Try invalid joint.</thought>\n<action_chunk>[{"dt": 0.4, "joints": {"left_wing_flap": 0.5}}]</action_chunk>'
+            bad = '<action_chunk>[{"dt": 0.4, "joints": {"left_wing_flap": 0.5}}]</action_chunk>'
             return GenerationStep(text=bad, matched_stop="</action_chunk>", latency_s=0.01, model=self.model)
         if self.calls == 2:
-            good = (
-                "<thought>Fixed joint name from harness_error.</thought>\n"
-                '<action_chunk>[{"dt": 0.4, "joints": {"head_yaw": 0.35}}]</action_chunk>'
-            )
+            good = '<action_chunk>[{"dt": 0.4, "joints": {"head_yaw": 0.35}}]</action_chunk>'
             return GenerationStep(text=good, matched_stop="</action_chunk>", latency_s=0.01, model=self.model)
         return GenerationStep(
-            text="<thought>Yaw updated.</thought>\n<done>Self-repair verified.</done>",
+            text="<done>Self-repair verified.</done>",
             matched_stop="</done>",
             latency_s=0.01,
             model=self.model,
@@ -55,22 +52,22 @@ class HarnessUnitTests(unittest.TestCase):
         stops = ["</action_chunk>", "</done>"]
 
         # Provider stripped `</action_chunk>` and did not return explicit stop string (e.g. OpenAI)
-        raw = '<thought>Scan left</thought>\n<action_chunk>[{"dt": 0.4, "joints": {"head_yaw": 0.5}}]'
+        raw = '<action_chunk>[{"dt": 0.4, "joints": {"head_yaw": 0.5}}]'
         fixed, matched = _reattach_stop_tag(raw, stops, explicit_stop=None)
         self.assertEqual(matched, "</action_chunk>")
         self.assertTrue(fixed.endswith("</action_chunk>"))
 
         # Provider returned explicit `stop_sequence` (e.g. Anthropic)
-        raw_done = "<thought>Finished</thought>\n<done>All good"
+        raw_done = "<done>All good"
         fixed_done, matched_done = _reattach_stop_tag(raw_done, stops, explicit_stop="</done>")
         self.assertEqual(matched_done, "</done>")
-        self.assertEqual(fixed_done, "<thought>Finished</thought>\n<done>All good</done>")
+        self.assertEqual(fixed_done, "<done>All good</done>")
 
         # Provider kept the stop sequence intact
-        already = "<thought>Done</thought>\n<done>Complete</done>  "
+        already = "<done>Complete</done>  "
         fixed_already, matched_already = _reattach_stop_tag(already, stops)
         self.assertEqual(matched_already, "</done>")
-        self.assertEqual(fixed_already, "<thought>Done</thought>\n<done>Complete</done>")
+        self.assertEqual(fixed_already, "<done>Complete</done>")
 
     def test_parse_action_chunk_validation(self) -> None:
         wps = parse_action_chunk('```json\n[{"dt": 0.5, "joints": {"head_yaw": 0.6, "head_pitch": 0.8}}]\n```')

@@ -13,7 +13,6 @@ from src.telemetry import JOINT_NAMES, TelemetrySnapshot
 
 STOP_SEQUENCES: List[str] = ["</action_chunk>", "</done>"]
 
-THOUGHT_RE = re.compile(r"<thought>(.*?)</thought>", re.DOTALL)
 ACTION_RE = re.compile(r"<action_chunk>(.*?)</action_chunk>", re.DOTALL)
 DONE_RE = re.compile(r"<done>(.*?)</done>|<done\s*/>", re.DOTALL)
 
@@ -35,7 +34,6 @@ class HarnessTurn:
 
     turn_idx: int
     raw_llm_text: str
-    thought: str
     waypoints: List[Waypoint]
     observation_xml: str
     telemetry: TelemetrySnapshot
@@ -129,9 +127,6 @@ def run_harness_episode(
         )
         messages.append({"role": "assistant", "content": gen.text})
 
-        thought_match = THOUGHT_RE.search(gen.text)
-        thought = thought_match.group(1).strip() if thought_match else ""
-
         # Case 1: Model emitted `<done>`
         done_match = DONE_RE.search(gen.text)
         if done_match and not ACTION_RE.search(gen.text):
@@ -142,7 +137,6 @@ def run_harness_episode(
                 HarnessTurn(
                     turn_idx=turn_idx,
                     raw_llm_text=gen.text,
-                    thought=thought,
                     waypoints=[],
                     observation_xml="",
                     telemetry=last_snap,
@@ -161,7 +155,7 @@ def run_harness_episode(
         if not action_match:
             err_msg = (
                 '<harness_error>No `<action_chunk>...</action_chunk>` or `<done>...</done>` tag detected. '
-                "Always emit `<thought>...</thought>` followed immediately by `<action_chunk>[...]</action_chunk>` "
+                "Always emit `<action_chunk>[...]</action_chunk>` "
                 "or `<done>summary</done>`.</harness_error>"
             )
             messages.append({"role": "user", "content": err_msg})
@@ -171,7 +165,6 @@ def run_harness_episode(
                 HarnessTurn(
                     turn_idx=turn_idx,
                     raw_llm_text=gen.text,
-                    thought=thought,
                     waypoints=[],
                     observation_xml=err_msg,
                     telemetry=last_snap,
@@ -193,7 +186,6 @@ def run_harness_episode(
                 HarnessTurn(
                     turn_idx=turn_idx,
                     raw_llm_text=gen.text,
-                    thought=thought,
                     waypoints=[],
                     observation_xml=err_msg,
                     telemetry=last_snap,
@@ -215,7 +207,6 @@ def run_harness_episode(
             HarnessTurn(
                 turn_idx=turn_idx,
                 raw_llm_text=gen.text,
-                thought=thought,
                 waypoints=waypoints,
                 observation_xml=obs_xml,
                 telemetry=snap,

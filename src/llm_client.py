@@ -273,22 +273,18 @@ class ModelClient:
         model_id = self.model[len("models/") :] if self.model.startswith("models/") else self.model
         url = f"{self.base_url}/models/{model_id}:generateContent"
 
-        def _extract_parts(resp_data: Dict[str, Any]) -> tuple[str, str]:
+        def _extract_visible_text(resp_data: Dict[str, Any]) -> str:
             cands = resp_data.get("candidates", [])
             if not cands:
-                return "", ""
+                return ""
             pts = cands[0].get("content", {}).get("parts", [])
-            vis = "".join(p.get("text", "") for p in pts if not p.get("thought", False))
-            th = "".join(p.get("text", "") for p in pts if p.get("thought", False)).strip()
-            return vis, th
+            return "".join(p.get("text", "") for p in pts if not p.get("thought", False))
 
         gen_cfg: Dict[str, Any] = {
             "temperature": self.temperature,
             "maxOutputTokens": max(self.max_tokens, 4096),
             "stopSequences": stop_sequences,
         }
-        if model_id.startswith("gemini-"):
-            gen_cfg["thinkingConfig"] = {"includeThoughts": True}
 
         payload: Dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -296,7 +292,7 @@ class ModelClient:
             "generationConfig": gen_cfg,
         }
         data = self._post_with_retries(url, json_payload=payload, params={"key": self.api_key})
-        raw_text, native_thought = _extract_parts(data)
+        raw_text = _extract_visible_text(data)
 
         # Generalist Gemini 3.x thinking models also match `stopSequences` inside internal `thought: true`
         # scratchpad parts. If the model mentioned literal `</action_chunk>` or `</done>` while thinking,
@@ -306,15 +302,13 @@ class ModelClient:
                 "temperature": self.temperature,
                 "maxOutputTokens": max(self.max_tokens, 4096),
             }
-            if model_id.startswith("gemini-"):
-                fallback_cfg["thinkingConfig"] = {"includeThoughts": True}
             fallback_payload: Dict[str, Any] = {
                 "systemInstruction": {"parts": [{"text": system_prompt}]},
                 "contents": contents,
                 "generationConfig": fallback_cfg,
             }
             data = self._post_with_retries(url, json_payload=fallback_payload, params={"key": self.api_key})
-            raw_text, native_thought = _extract_parts(data)
+            raw_text = _extract_visible_text(data)
 
         # Always enforce stop-sequence truncation locally as well in case fallback ran
         earliest_idx: Optional[int] = None
@@ -329,8 +323,6 @@ class ModelClient:
 
         latency_s = time.perf_counter() - t0
         full_text, matched_stop = _reattach_stop_tag(raw_text, stop_sequences, earliest_seq)
-        if native_thought and "<thought>" not in full_text:
-            full_text = f"<thought>\n{native_thought}\n</thought>\n{full_text}"
 
         usage = data.get("usageMetadata", {})
         return GenerationStep(
