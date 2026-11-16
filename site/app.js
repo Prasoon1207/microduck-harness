@@ -7,6 +7,7 @@ import {
   STOP_SEQUENCES,
   callGeminiDirect,
   generateDemoStep,
+  listGeminiModelsDirect,
   parseActionChunk,
 } from "./harness.js";
 import { MicroDuckWasmSim } from "./sim.js";
@@ -23,6 +24,7 @@ import { MicroDuckWasmSim } from "./sim.js";
     keyBadge: document.getElementById("key-badge"),
     btnKeyManage: document.getElementById("btn-key-manage"),
     modelInput: document.getElementById("model-name-input"),
+    modelSuggestions: document.getElementById("model-suggestions"),
     btnStand: document.getElementById("btn-reset-stand"),
     btnSit: document.getElementById("btn-reset-sit"),
     btnClear: document.getElementById("btn-clear-chat"),
@@ -143,7 +145,7 @@ import { MicroDuckWasmSim } from "./sim.js";
   window.addEventListener("pagehide", wipeEphemeralKey);
   window.addEventListener("beforeunload", wipeEphemeralKey);
 
-  el.keyGateForm.addEventListener("submit", (ev) => {
+  el.keyGateForm.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const raw = el.apiKeyInput.value.trim();
     el.apiKeyInput.value = "";
@@ -153,10 +155,33 @@ import { MicroDuckWasmSim } from "./sim.js";
       return;
     }
     el.keyError.hidden = true;
-    _ephemeralGeminiKey = raw;
-    _authMode = "gemini";
-    syncAuthUI(true);
-    if (state.simReady) el.promptInput.focus();
+    el.btnSaveKey.disabled = true;
+    el.btnSaveKey.textContent = "Verifying...";
+    try {
+      const { models, bestDefault } = await listGeminiModelsDirect(raw);
+      if (models.length > 0 && el.modelSuggestions) {
+        el.modelSuggestions.innerHTML = "";
+        for (const m of models) {
+          const opt = document.createElement("option");
+          opt.value = m;
+          el.modelSuggestions.appendChild(opt);
+        }
+        const cur = el.modelInput.value.trim();
+        if (!cur || !models.includes(cur)) {
+          el.modelInput.value = bestDefault;
+        }
+      }
+      _ephemeralGeminiKey = raw;
+      _authMode = "gemini";
+      syncAuthUI(true);
+      if (state.simReady) el.promptInput.focus();
+    } catch (err) {
+      el.keyError.hidden = false;
+      el.keyError.textContent = err.message || String(err);
+    } finally {
+      el.btnSaveKey.disabled = false;
+      el.btnSaveKey.textContent = "Connect Gemini";
+    }
   });
 
   el.btnUseDemo.addEventListener("click", () => {
@@ -512,12 +537,15 @@ import { MicroDuckWasmSim } from "./sim.js";
           }
           gen = await callGeminiDirect({
             apiKey: _ephemeralGeminiKey,
-            model: el.modelInput.value.trim() || "gemini-2.5-flash",
+            model: el.modelInput.value.trim() || "gemini-3.5-flash",
             systemPrompt: INTERACTIVE_SYSTEM_PROMPT,
             messages: state.llmMessages,
             stopSequences: STOP_SEQUENCES,
             signal: state.abortCtrl.signal,
           });
+          if (gen.model && el.modelInput.value !== gen.model) {
+            el.modelInput.value = gen.model;
+          }
         }
 
         if (state.cancelRequested) {

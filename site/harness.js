@@ -210,10 +210,52 @@ export function reattachStopTag(text, stopSequences, explicitStop = null) {
 
 /* Direct Browser -> Google Gemini API Client (API key never touches any third-party server) */
 
+const PREFERRED_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.8-flash",
+  "gemini-pro-latest",
+  "gemini-3-flash-preview",
+];
+
+export async function listGeminiModelsDirect(apiKey) {
+  const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+    method: "GET",
+    mode: "cors",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    headers: { "x-goog-api-key": apiKey },
+  });
+  if (!resp.ok) {
+    let detail = `HTTP ${resp.status}`;
+    try {
+      const errJson = await resp.json();
+      detail = (errJson.error && errJson.error.message) || detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`Invalid key or Gemini error (${resp.status}): ${detail}`);
+  }
+  const data = await resp.json();
+  const rawModels = (data && data.models) || [];
+  const textModels = rawModels
+    .filter(
+      (m) =>
+        Array.isArray(m.supportedGenerationMethods) &&
+        m.supportedGenerationMethods.includes("generateContent") &&
+        typeof m.name === "string" &&
+        m.name.includes("gemini") &&
+        !/tts|image|transcribe|embedding|imagen|veo/i.test(m.name)
+    )
+    .map((m) => m.name.replace(/^models\//, ""));
+
+  const bestDefault = PREFERRED_MODELS.find((p) => textModels.includes(p)) || textModels[0] || "gemini-flash-latest";
+  return { models: textModels, bestDefault };
+}
+
 export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, stopSequences = STOP_SEQUENCES, signal }) {
   const t0 = performance.now();
-  const modelId = String(model || "gemini-2.5-flash").replace(/^models\//, "").trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
+  let modelId = String(model || "gemini-3.5-flash").replace(/^models\//, "").trim();
 
   const contents = messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
@@ -230,8 +272,9 @@ export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, 
       .join("");
   }
 
-  async function postGenerate(genConfig) {
-    const resp = await fetch(url, {
+  async function postGenerate(targetModel, genConfig) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(targetModel)}:generateContent`;
+    return fetch(url, {
       method: "POST",
       mode: "cors",
       credentials: "omit",
@@ -247,7 +290,17 @@ export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, 
       }),
       signal,
     });
+  }
 
+  async function postWithModelFallback(genConfig) {
+    let resp = await postGenerate(modelId, genConfig);
+    if (resp.status === 404) {
+      const discovered = await listGeminiModelsDirect(apiKey);
+      if (discovered.bestDefault && discovered.bestDefault !== modelId) {
+        modelId = discovered.bestDefault;
+        resp = await postGenerate(modelId, genConfig);
+      }
+    }
     if (!resp.ok) {
       let detail = `HTTP ${resp.status}`;
       try {
@@ -261,7 +314,7 @@ export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, 
     return resp.json();
   }
 
-  let data = await postGenerate({
+  let data = await postWithModelFallback({
     temperature: 0.2,
     maxOutputTokens: 8192,
     stopSequences,
@@ -270,7 +323,7 @@ export async function callGeminiDirect({ apiKey, model, systemPrompt, messages, 
 
   // Fallback if a thinking model matched a stop delimiter inside internal thought parts
   if (stopSequences.length > 0 && !rawText.trim()) {
-    data = await postGenerate({
+    data = await postWithModelFallback({
       temperature: 0.2,
       maxOutputTokens: 8192,
     });

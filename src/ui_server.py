@@ -63,7 +63,7 @@ def detect_available_providers() -> List[Dict[str, Any]]:
     """Inspect environment / `.env` to report configured LLM providers alongside offline demo mode."""
     _load_dotenv_if_present()
     specs = [
-        ("gemini", "Gemini", bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")), ["gemini-3.5-flash", "gemini-pro-latest", "gemini-2.5-flash", "gemini-2.5-pro"]),
+        ("gemini", "Gemini", bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")), ["gemini-3.5-flash", "gemini-flash-latest", "gemini-pro-latest", "gemini-3.8-flash"]),
         ("anthropic", "Anthropic", bool(os.environ.get("ANTHROPIC_API_KEY")), ["claude-sonnet-4-20250514", "claude-opus-4-20250514"]),
         ("openai", "OpenAI", bool(os.environ.get("OPENAI_API_KEY")), ["gpt-4.1", "gpt-4.1-mini", "o4-mini"]),
         ("openrouter", "OpenRouter", bool(os.environ.get("OPENROUTER_API_KEY")), ["anthropic/claude-sonnet-4", "google/gemini-2.5-pro"]),
