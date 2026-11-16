@@ -170,7 +170,7 @@ export class MicroDuckWasmSim {
   async init() {
     this.onProgress("Loading WASM & WebGL...");
     const [mjMod, THREE] = await Promise.all([
-      import("./vendor/mujoco.min.js"),
+      import("./vendor/mujoco.js"),
       import("./vendor/three.module.min.js"),
     ]);
     this.THREE = THREE;
